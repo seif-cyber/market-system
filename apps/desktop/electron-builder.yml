@@ -18,3 +18,4 @@ nsis:
   perMachine: true
   allowToChangeInstallationDirectory: true
   language: "1025"
+electronVersion: 33.2.1
