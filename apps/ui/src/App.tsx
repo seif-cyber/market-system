@@ -6,13 +6,17 @@ import { Pos } from "./pages/Pos";
 import { Dashboard } from "./pages/Dashboard";
 import { Inventory } from "./pages/Inventory";
 import { Customers } from "./pages/Customers";
+import { Parties } from "./pages/Parties";
+import { Purchases } from "./pages/Purchases";
+import { Reports } from "./pages/Reports";
+import { Offers } from "./pages/Offers";
 import { Expenses } from "./pages/Expenses";
 import { Settings } from "./pages/Settings";
 import { Shifts } from "./pages/Shifts";
 import { Treasury } from "./pages/Treasury";
 import { SupportButton } from "./components/ui";
 
-type Tab = "pos" | "dash" | "shifts" | "treasury" | "inv" | "cust" | "exp" | "set";
+type Tab = "pos" | "dash" | "shifts" | "treasury" | "inv" | "buy" | "cust" | "offers" | "exp" | "reports" | "set";
 
 export function App() {
   const [b, setB] = useState<Bootstrap | null>(null);
@@ -31,8 +35,8 @@ export function App() {
   const owner = b.user.role === "owner";
   const lic = b.license;
   const tabs: [Tab, string, boolean][] = [
-    ["pos", "البيع", true], ["dash", "لوحة التحكم", manager], ["shifts", "الورديات", manager], ["treasury", "الخزنة", manager], ["inv", "المخزون", true],
-    ["cust", "العملاء", true], ["exp", "المصاريف", manager], ["set", "الإعدادات", manager],
+    ["pos", "البيع", true], ["dash", "لوحة التحكم", manager], ["shifts", "الورديات", manager], ["treasury", "الخزنة", manager], ["inv", "المخزون", true], ["buy", "المشتريات", manager],
+    ["cust", manager ? "العملاء والموردين" : "العملاء", true], ["offers", "العروض", manager], ["exp", "المصاريف", manager], ["reports", "التقارير", manager], ["set", "الإعدادات", manager],
   ];
   const active = tabs.find((t) => t[0] === tab && t[2]) ? tab : "pos";
   return (
@@ -60,7 +64,10 @@ export function App() {
         {active === "shifts" && <Shifts />}
         {active === "treasury" && <Treasury />}
         {active === "inv" && <Inventory canEdit={manager} />}
-        {active === "cust" && <Customers canManage={manager} />}
+        {active === "buy" && <Purchases b={b} />}
+        {active === "cust" && (manager ? <Parties b={b} /> : <Customers canManage={false} />)}
+        {active === "offers" && <Offers />}
+        {active === "reports" && <Reports b={b} />}
         {active === "exp" && <Expenses isOwner={owner} hasShift={!!b.shift} />}
         {active === "set" && <Settings b={b} onChange={reload} />}
       </main>

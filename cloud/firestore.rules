@@ -1,8 +1,47 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Each shop owner can read and write only their own area; everything else is denied.
-    match /shops/{uid}/{document=**} {
+
+    // A shop's data lives in shops/{shopId}; shopId is the uid of the shop PC's own (anonymous) identity.
+    // The shop PC writes. One owner account, linked with a short-lived pairing code, reads.
+    match /shops/{shopId} {
+      function signedIn() { return request.auth != null; }
+      function isDevice() { return signedIn() && request.auth.uid == shopId; }
+      function ownerPath() { return /databases/$(database)/documents/shops/$(shopId)/meta/owner; }
+      function isOwner() { return signedIn() && exists(ownerPath()) && get(ownerPath()).data.uid == request.auth.uid; }
+      function pairing() { return get(/databases/$(database)/documents/pairings/$(request.resource.data.code)).data; }
+
+      // Linking: whoever holds a valid, unexpired pairing code for this shop can claim it, and only while it has no owner.
+      match /meta/owner {
+        allow get: if isDevice() || isOwner();
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['uid', 'email', 'name', 'code', 'linkedAt'])
+          && request.resource.data.uid == request.auth.uid
+          && !exists(ownerPath())
+          && pairing().deviceUid == shopId
+          && pairing().expiresAt > request.time.toMillis();
+        allow delete: if isDevice() || isOwner();
+      }
+
+      match /{document=**} {
+        allow read: if isDevice() || isOwner();
+        allow write: if isDevice();
+      }
+    }
+
+    // Pairing codes: only the device that made one can create/delete it; anyone signed in can read a code they already know (no listing).
+    match /pairings/{code} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['deviceUid', 'expiresAt', 'createdAt'])
+        && request.resource.data.deviceUid == request.auth.uid
+        && request.resource.data.expiresAt is int
+        && request.resource.data.expiresAt <= request.time.toMillis() + 20 * 60 * 1000;
+      allow delete: if request.auth != null && resource.data.deviceUid == request.auth.uid;
+    }
+
+    // Each account's own list of linked shops.
+    match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
   }

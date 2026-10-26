@@ -3,6 +3,7 @@ import type { Db } from "./types";
 import { expiringBatches } from "./inventory";
 import { balances, verifyTreasury } from "./treasury";
 import { totalReceivables } from "./customers";
+import { totalPayables } from "./purchases";
 
 export type RangePreset = "today" | "7d" | "30d" | "month";
 const DAY = 86_400_000;
@@ -97,6 +98,13 @@ export function analytics(db: Db, range: { from: number; to: number }, now = Dat
     { f: from, t: to } as any,
   ).filter((c) => c.invoices > 0 || c.returns > 0 || c.cashDiff !== 0).sort((a, b) => b.sales - a.sales);
 
+  const categories = all<Analytics["categories"][number]>(
+    db,
+    `SELECT COALESCE(c.name,'بدون قسم') name, SUM(si.qty) qty, CAST(ROUND(SUM(si.unit_price*si.qty - si.discount)) AS INTEGER) revenue,
+            CAST(ROUND(SUM(si.unit_price*si.qty - si.discount - si.cost*si.qty)) AS INTEGER) profit
+     FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN products p ON p.id=si.product_id LEFT JOIN categories c ON c.id=p.category_id
+     WHERE s.created_at BETWEEN ? AND ? GROUP BY c.id ORDER BY revenue DESC`, from, to,
+  );
   const payments = all<{ method: string; total: number }>(db, "SELECT pay_method method, SUM(total) total FROM sales WHERE created_at BETWEEN ? AND ? GROUP BY pay_method ORDER BY total DESC", from, to);
   const expensesByCategory = all<{ category: string; total: number }>(db, "SELECT category, SUM(amount) total FROM expenses WHERE voided=0 AND created_at BETWEEN ? AND ? GROUP BY category ORDER BY total DESC", from, to);
   const lowStock = all<Analytics["lowStock"][number]>(db, "SELECT id, name, stock, min_stock minStock FROM products WHERE active=1 AND min_stock>0 AND stock<=min_stock ORDER BY stock/min_stock LIMIT 10");
@@ -115,7 +123,8 @@ export function analytics(db: Db, range: { from: number; to: number }, now = Dat
     expiring: expiringBatches(db, alertDays, now, 10),
     debts: { total: debtRows.reduce((s, r) => s + r.balance, 0), top: debtRows.slice(0, 5) },
     integrity: verifySalesChain(db),
-    position: { ...balances(db), receivables: totalReceivables(db), payables: 0 },
+    categories,
+    position: { ...balances(db), receivables: totalReceivables(db), payables: totalPayables(db) },
     treasuryCheck: (({ ok, mismatches }) => ({ ok, mismatches: mismatches.length }))(verifyTreasury(db)),
   };
 }

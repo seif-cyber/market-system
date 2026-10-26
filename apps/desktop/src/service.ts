@@ -1,16 +1,21 @@
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  licenseState, parseProductsCsv, parseScaleBarcode, SUPPORT_CONTACTS, whatsappUrl,
-  type Api, type Approval, type BrandSettings, type CloudStatus, type Role, type SessionUser,
+  applyPromotions, licenseState, parsePartiesCsv, parseProductsCsv, parseScaleBarcode, SUPPORT_CONTACTS, whatsappUrl,
+  type Api, type Approval, type BrandSettings, type CloudStatus, type PaySource, type PromotionRow, type RangePreset, type ReportFilters, type Role, type SessionUser,
 } from "@market/core";
 import {
+  addCategory, addSupplierOpening, beginImport, createPurchase, deleteCategory, getParty, importParties, listActivePromotions, listCategories, listImports,
+  listParties, listPromotions, listPurchases, listReports, paySupplier, purchaseItems, renameCategory, runReport as dbRunReport,
+  saveParty, savePromotion, seedDefaultCategories, setPartyActive, setPromotionActive, supplierDues, supplierStatement, toParams, totalPayables,
+  undoImport, voidPurchase,
   addCustomer, addExpense, addPayment, adjustStock, analytics, audit, closeShift, createReturn, createSale, createUser,
   balances, countAdjust, currentShift, deposit, lastClosedShift, listEntries, totalReceivables, transfer, verifyTreasury, voidExpense, withdraw, shiftHistory, shiftSummary, expiringBatches, findByBarcode, getCustomer, getSaleForReturn, getSetting, importProducts,
   listCustomers, listExpenses, listProducts, listUsers, loginWithPin, openShift, rangeFor, receiveStock, saveProduct,
   searchProducts, setCreditLimit, setPin, setSetting, setUserActive, statement, validateBackup, type Db,
 } from "@market/db";
 import { buildReceiptHtml, buildShiftReportHtml } from "./receipt";
+import { reportHtml, reportXlsx } from "./exportReport";
 
 const DEFAULT_BRAND: BrandSettings = {
   brand_name: "اسم المحل", logo: "", address: "", phone: "", tax_no: "", footer: "شكراً لزيارتكم",
@@ -21,7 +26,8 @@ const MAX_FAILS = 5, LOCK_MS = 60_000, KEEP_BACKUPS = 30;
 
 export interface Cloud {
   status(): CloudStatus;
-  link(email: string, password: string): Promise<CloudStatus>;
+  startLink(): Promise<CloudStatus>;
+  checkLink(): Promise<CloudStatus>;
   unlink(): Promise<CloudStatus>;
   syncNow(): Promise<CloudStatus>;
 }
@@ -41,6 +47,8 @@ export interface Deps {
   isDemo?: () => boolean;
   openUrl?: (url: string) => Promise<void>;
   cloud?: Cloud;
+  /** Save/print a report (dialogs live in the main process). Returns the saved path, or null when cancelled. */
+  exportFile?: (a: { kind: "xlsx" | "pdf" | "print"; title: string; html: string; buildXlsx: () => Promise<Buffer> }) => Promise<string | null>;
 }
 
 export type Service = Api & { autoBackup(): Promise<void> };
@@ -120,6 +128,20 @@ export function createService(deps: Deps): Service {
   const pruneBackups = (dir: string) => {
     const files = readdirSync(dir).filter((f) => f.endsWith(".db")).sort();
     for (const f of files.slice(0, Math.max(0, files.length - KEEP_BACKUPS))) rmSync(join(dir, f), { force: true });
+  };
+
+  /** Best running promotion per cart line, computed here (never trusted from the UI). */
+  const promoFor = (lines: { productId: number; qty: number }[]) => {
+    const info = lines.map((l) => (db.prepare("SELECT price, category_id c FROM products WHERE id=?").get(l.productId) ?? { price: 0, c: null }) as { price: number; c: number | null });
+    const res = applyPromotions(lines.map((l, k) => ({ productId: l.productId, categoryId: info[k].c, unitPrice: info[k].price, qty: l.qty })), listActivePromotions(db, now()), now());
+    return res.map((r, k) => ({ ...r, gross: Math.round(info[k].price * lines[k].qty) }));
+  };
+  const range = (r?: RangePreset | "all") => (r && r !== "all" ? rangeFor(r, now()) : { from: 0, to: now() });
+  /** A custom "to" date is the start of that day; reports include the whole day. */
+  const normalize = (f: ReportFilters): ReportFilters => (f.range === "custom" && f.to ? { ...f, to: f.to + 86_400_000 - 1 } : f);
+  const payAccount = (source: PaySource, u: SessionUser) => {
+    if (source === "drawer") return { account: "cash" as const, inDrawer: true, shiftId: requireShift(u).id };
+    return { account: source, inDrawer: false, shiftId: undefined };
   };
 
   const svc: Service = {
@@ -206,9 +228,16 @@ export function createService(deps: Deps): Service {
         if (!c) throw new Error("اختار العميل للبيع الآجل");
         customerName = c.name;
       }
+      // Promotions are applied server-side; a manual line discount (already approved above) is kept and added to.
+      const promos = promoFor(i.lines);
+      const lines = i.lines.map((l, k) => {
+        const manual = l.discount ?? 0;
+        const pd = Math.min(promos[k].discount, Math.max(0, promos[k].gross - manual));
+        return { productId: l.productId, qty: l.qty, discount: manual + pd, promoId: pd > 0 ? promos[k].promoId : null, promoDiscount: pd };
+      });
       const sale = db.transaction(() => {
         const r = createSale(db, {
-          userId: actor.id, lines: i.lines, payMethod: i.payMethod, invoiceDiscount: i.invoiceDiscount, taxRate, taxInclusive,
+          userId: actor.id, lines, payMethod: i.payMethod, invoiceDiscount: i.invoiceDiscount, taxRate, taxInclusive,
           shiftId: shift.id, customerId: i.customerId, paidNow: i.paidNow, createdAt: now(),
         });
         if (i.payMethod === "credit") {
@@ -219,7 +248,7 @@ export function createService(deps: Deps): Service {
         return r;
       })();
       if (approvedBy) audit(db, approvedBy, "discount_approved", { sale: sale.no });
-      const items = db.prepare("SELECT name,qty,unit_price AS unitPrice,discount FROM sale_items WHERE sale_id=?").all(sale.saleId) as any[];
+      const items = db.prepare("SELECT name,qty,unit_price AS unitPrice,discount,promo_discount AS promo FROM sale_items WHERE sale_id=?").all(sale.saleId) as any[];
       const receiptHtml = buildReceiptHtml({
         brand: b, no: sale.no, cashier: actor.name, createdAt: now(), items, subtotal: sale.subtotal, discount: sale.discount,
         tax: sale.tax, total: sale.total, payMethod: i.payMethod, customerName, paid: sale.paid,
@@ -227,12 +256,23 @@ export function createService(deps: Deps): Service {
       return { no: sale.no, total: sale.total, receiptHtml };
     },
 
-    async importCsv(text) {
+    async importCsv(text, fileName) {
       const u = need("manager");
       const { products, errors } = parseProductsCsv(text);
-      const r = importProducts(db, products, now());
-      audit(db, u.id, "products_imported", { ...r, errors: errors.length });
-      return { ...r, errors };
+      const batchId = products.length ? beginImport(db, "products", fileName || "ملف أصناف", u.id, now()) : null;
+      const r = importProducts(db, products, now(), batchId ?? undefined);
+      audit(db, u.id, "products_imported", { ...r, errors: errors.length, batchId });
+      return { ...r, errors, batchId };
+    },
+    async listImports() {
+      need("manager");
+      return listImports(db);
+    },
+    async undoImport(id) {
+      const u = need("manager");
+      const r = undoImport(db, id, now());
+      audit(db, u.id, "import_undone", { id, ...r });
+      return r;
     },
 
     async print(html) {
@@ -374,9 +414,9 @@ export function createService(deps: Deps): Service {
     },
 
     // ---- inventory ----
-    async listProducts(q, filter) {
+    async listProducts(q, filter, categoryId) {
       const u = need("cashier");
-      const rows = listProducts(db, q, filter);
+      const rows = listProducts(db, q, filter, 300, categoryId);
       return u.role === "cashier" ? rows.map((r) => ({ ...r, cost: 0 })) : rows; // purchase prices are for managers only
     },
     async saveProduct(p) {
@@ -407,11 +447,152 @@ export function createService(deps: Deps): Service {
       return analytics(db, rangeFor(range, now()), now(), Number(brand().expiry_alert_days) || 30);
     },
 
+    // ---- customers & suppliers (one party list) ----
+    async listParties(f) {
+      need("manager");
+      return listParties(db, f);
+    },
+    async saveParty(p) {
+      const u = need("manager");
+      const id = saveParty(db, p, now());
+      audit(db, u.id, p.id ? "party_edited" : "party_added", { id, customer: p.isCustomer, supplier: p.isSupplier });
+      return id;
+    },
+    async setPartyActive(id, active) {
+      const u = need("manager");
+      setPartyActive(db, id, active);
+      audit(db, u.id, active ? "party_enabled" : "party_disabled", { id });
+    },
+    async importParties(csv, fileName) {
+      const u = need("manager");
+      const { parties, errors } = parsePartiesCsv(csv);
+      const batchId = parties.length ? beginImport(db, "parties", fileName || "ملف عملاء وموردين", u.id, now()) : null;
+      const r = importParties(db, parties, now(), batchId ?? undefined);
+      audit(db, u.id, "parties_imported", { ...r, errors: errors.length, batchId });
+      return { ...r, errors, batchId };
+    },
+
+    // ---- purchases & suppliers ----
+    async supplierStatement(supplierId) {
+      need("manager");
+      return supplierStatement(db, supplierId);
+    },
+    async listPurchases(f) {
+      need("manager");
+      const r = range(f?.range);
+      return listPurchases(db, { supplierId: f?.supplierId, from: r.from, to: r.to }, now());
+    },
+    async purchaseDetails(id) {
+      need("manager");
+      const invoice = listPurchases(db, { id, limit: 1 }, now())[0];
+      return invoice ? { invoice, items: purchaseItems(db, id) } : null;
+    },
+    async createPurchase(i) {
+      const u = need("manager");
+      const pay = i.paid && i.paid.amount > 0 ? { amount: i.paid.amount, ...payAccount(i.paid.source, u) } : undefined;
+      const r = createPurchase(db, { ...i, paid: pay, userId: u.id, createdAt: now() });
+      audit(db, u.id, "purchase_created", { id: r.id, supplier: i.supplierId, total: r.total, paid: r.paid });
+      return r;
+    },
+    async paySupplier(supplierId, amount, source, note) {
+      const u = need("manager");
+      const left = paySupplier(db, { supplierId, amount, ...payAccount(source, u), userId: u.id, note, createdAt: now() });
+      audit(db, u.id, "supplier_paid", { supplierId, amount, source });
+      return left;
+    },
+    async voidPurchase(id) {
+      const u = need("manager");
+      voidPurchase(db, id, u.id, now());
+      audit(db, u.id, "purchase_voided", { id });
+    },
+    async addSupplierOpening(supplierId, amount, note) {
+      const u = need("manager");
+      addSupplierOpening(db, supplierId, amount, u.id, note || "رصيد افتتاحي", now());
+      audit(db, u.id, "supplier_opening", { supplierId, amount });
+    },
+    async supplierDues() {
+      need("manager");
+      return supplierDues(db, now());
+    },
+
+    // ---- categories ----
+    async listCategories() {
+      need("cashier");
+      return listCategories(db);
+    },
+    async addCategory(name) {
+      const u = need("manager");
+      const id = addCategory(db, name);
+      audit(db, u.id, "category_added", { id, name });
+      return id;
+    },
+    async renameCategory(id, name) {
+      const u = need("manager");
+      renameCategory(db, id, name);
+      audit(db, u.id, "category_renamed", { id, name });
+    },
+    async deleteCategory(id) {
+      const u = need("manager");
+      deleteCategory(db, id);
+      audit(db, u.id, "category_deleted", { id });
+    },
+    async seedCategories() {
+      const u = need("manager");
+      const n = seedDefaultCategories(db);
+      audit(db, u.id, "categories_seeded", { n });
+      return n;
+    },
+
+    // ---- promotions ----
+    async listPromotions() {
+      need("manager");
+      const t = now();
+      return listPromotions(db).map((p): PromotionRow => ({
+        ...p,
+        targetName: ((p.target === "product" ? db.prepare("SELECT name FROM products WHERE id=?") : db.prepare("SELECT name FROM categories WHERE id=?")).get(p.targetId) as { name: string } | undefined)?.name ?? "",
+        state: !p.active ? "stopped" : p.endsAt < t ? "ended" : p.startsAt > t ? "upcoming" : "running",
+      }));
+    },
+    async savePromotion(p) {
+      const u = need("manager");
+      const id = savePromotion(db, p, u.id, now());
+      audit(db, u.id, p.id ? "promotion_edited" : "promotion_added", { id, name: p.name });
+      return id;
+    },
+    async setPromotionActive(id, active) {
+      const u = need("manager");
+      setPromotionActive(db, id, active);
+      audit(db, u.id, active ? "promotion_enabled" : "promotion_stopped", { id });
+    },
+    async previewCart(lines) {
+      need("cashier");
+      const r = lines.length ? promoFor(lines) : [];
+      return { lines: lines.map((l, k) => ({ productId: l.productId, discount: r[k].discount, name: r[k].name })), total: r.reduce((s, x) => s + x.discount, 0) };
+    },
+
+    // ---- reports ----
+    async reportList() {
+      need("manager");
+      return listReports();
+    },
+    async runReport(id, f) {
+      need("manager");
+      return dbRunReport(db, id, toParams(normalize(f), now(), rangeFor), now());
+    },
+    async exportReport(id, f, kind) {
+      const u = need("manager");
+      const report = dbRunReport(db, id, toParams(normalize(f), now(), rangeFor), now());
+      const b = brand();
+      const path = await deps.exportFile?.({ kind, title: report.title, html: reportHtml(report, b, now()), buildXlsx: () => reportXlsx(report, b.brand_name) });
+      audit(db, u.id, "report_exported", { id, kind });
+      return path ?? null;
+    },
+
     // ---- treasury (owner and manager) ----
     async treasury() {
       need("manager");
       const b = balances(db);
-      const receivables = totalReceivables(db), payables = 0;
+      const receivables = totalReceivables(db), payables = totalPayables(db);
       return { ...b, receivables, payables, net: b.total + receivables - payables, check: verifyTreasury(db) };
     },
     async treasuryEntries(f) {
@@ -498,13 +679,22 @@ export function createService(deps: Deps): Service {
 
     async cloudStatus() {
       need("manager");
-      return deps.cloud?.status() ?? { configured: false, linked: false, email: "", lastSync: 0, lastError: "" };
+      return deps.cloud?.status() ?? { configured: false, linked: false, email: "", lastSync: 0, lastError: "", pending: null };
     },
-    async cloudLink(email, password) {
+    // Only the shop's owner can start the pairing; the owner then signs in on the website and enters the code.
+    async cloudStartLink() {
       const u = need("owner");
       if (!deps.cloud) throw new Error("الخدمة السحابية مش متاحة في النسخة دي");
-      const s = await deps.cloud.link(email, password);
-      audit(db, u.id, "cloud_linked", { email });
+      const s = await deps.cloud.startLink();
+      audit(db, u.id, "cloud_link_started");
+      return s;
+    },
+    async cloudCheckLink() {
+      need("owner");
+      if (!deps.cloud) throw new Error("الخدمة السحابية مش متاحة في النسخة دي");
+      const before = deps.cloud.status().linked;
+      const s = await deps.cloud.checkLink();
+      if (!before && s.linked) audit(db, null, "cloud_linked", { email: s.email });
       return s;
     },
     async cloudUnlink() {

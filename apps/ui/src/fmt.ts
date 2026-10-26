@@ -15,3 +15,20 @@ export const ago = (t: number, now = Date.now()) => {
   const h = Math.round(m / 60);
   return h < 48 ? `من ${num(h)} ساعة` : `من ${num(Math.round(h / 24))} يوم`;
 };
+
+const TIME_KEYS = new Set(["at", "openedAt", "closedAt", "last"]);
+/** Cell text for a report column (Arabic digits); mirrors the PDF/print formatting in the main process. */
+export function fmtCell(col: { key: string; type: string }, v: string | number | null): string {
+  if (v === null || v === undefined || v === "") return "";
+  if (col.type === "text") return String(v);
+  const n = Number(v);
+  if (col.type === "money") return egp(n);
+  if (col.type === "percent") return n.toLocaleString("ar-EG", { maximumFractionDigits: 1 }) + "٪";
+  if (col.type === "date") return TIME_KEYS.has(col.key) ? dateTimeAr(n) : dateLongAr(n);
+  return num(n);
+}
+
+export const KIND_AR: Record<string, string> = {
+  sale: "بيع", sale_return: "مرتجع", customer_payment: "سداد عميل", expense: "مصروف", expense_void: "إلغاء مصروف", deposit: "إيداع", withdrawal: "سحب",
+  transfer: "تحويل", count_adjust: "جرد", shift_diff: "فرق وردية", handover_adjust: "تعديل استلام الدرج", supplier_payment: "دفع مورد", supplier_payment_void: "إلغاء دفعة مورد",
+};

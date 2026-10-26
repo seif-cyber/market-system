@@ -18,7 +18,7 @@ console.log(cloudConfig ? "cloud sync: enabled" : "cloud sync: disabled (no Fire
 const common = { bundle: true, platform: "node", format: "cjs", target: "node20", sourcemap: false, minify: true, logLevel: "info" };
 await build({
   ...common, entryPoints: ["src/main.ts"], outfile: "dist/main.cjs",
-  external: ["electron", "better-sqlite3"],
+  external: ["electron", "better-sqlite3", "exceljs"],
   define: { __LICENSE_PUBLIC_KEY__: JSON.stringify(publicKey), __CLOUD_CONFIG__: JSON.stringify(cloudConfig) },
 });
 await build({ ...common, entryPoints: ["src/preload.ts"], outfile: "dist/preload.cjs", external: ["electron"] });

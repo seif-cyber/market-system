@@ -10,6 +10,13 @@
     "start": "npm run build && electron .",
     "dist": "npm run build && electron-builder --win --publish never"
   },
-  "dependencies": { "better-sqlite3": "^11.3.0" },
-  "devDependencies": { "electron": "33.2.1", "electron-builder": "^25.1.8", "esbuild": "^0.24.0" }
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "exceljs": "4.4.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0"
+  }
 }

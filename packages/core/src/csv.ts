@@ -25,9 +25,9 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export interface ImportedProduct { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number }
+export interface ImportedProduct { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number; category?: string }
 
-const HEAD: Record<string, "barcode" | "name" | "price" | "cost" | "stock" | "min_stock" | "expiry"> = {
+const HEAD: Record<string, "barcode" | "name" | "price" | "cost" | "stock" | "min_stock" | "expiry" | "category"> = {
   barcode: "barcode", "الباركود": "barcode", "باركود": "barcode",
   name: "name", "الاسم": "name", "اسم الصنف": "name",
   price: "price", "السعر": "price", "سعر البيع": "price",
@@ -35,6 +35,7 @@ const HEAD: Record<string, "barcode" | "name" | "price" | "cost" | "stock" | "mi
   stock: "stock", "الكمية": "stock", "المخزون": "stock",
   min_stock: "min_stock", "الحد الأدنى": "min_stock",
   expiry: "expiry", "تاريخ الصلاحية": "expiry", "الصلاحية": "expiry",
+  category: "category", "القسم": "category", "التصنيف": "category",
 };
 
 /** Accepts 2026-12-31 or 31/12/2026; returns epoch ms (end of that day) or undefined. */
@@ -67,8 +68,41 @@ export function parseProductsCsv(text: string): { products: ImportedProduct[]; e
     if (o.expiry && !expiry) return void errors.push(`سطر ${i + 2}: تاريخ الصلاحية غلط`);
     products.push({
       barcode: o.barcode, name: o.name, price, cost: toPiastres(o.cost ?? ""), stock: parseFloat(o.stock || "0") || 0,
-      ...(o.min_stock ? { minStock: parseFloat(o.min_stock) || 0 } : {}), ...(expiry ? { expiry } : {}),
+      ...(o.min_stock ? { minStock: parseFloat(o.min_stock) || 0 } : {}), ...(expiry ? { expiry } : {}), ...(o.category ? { category: o.category } : {}),
     });
   });
   return { products, errors };
+}
+
+export interface ImportedParty {
+  code: string; name: string; phone: string; taxNo: string; address: string; email: string;
+  isCustomer: boolean; isSupplier: boolean; creditLimit: number;
+}
+
+const PARTY_HEAD: Record<string, "code" | "name" | "phone" | "type" | "tax" | "address" | "email" | "limit"> = {
+  code: "code", "الكود": "code", "كود": "code", name: "name", "الاسم": "name", phone: "phone", "التليفون": "phone", "الهاتف": "phone", "رقم الهاتف": "phone",
+  type: "type", "النوع": "type", tax: "tax", "الرقم الضريبي": "tax", address: "address", "العنوان": "address", email: "email", "الإيميل": "email", "البريد الإلكتروني": "email",
+  limit: "limit", "حد الآجل": "limit",
+};
+
+/** Customers/suppliers from a CSV. "النوع": عميل | مورد | الاتنين (blank = عميل). */
+export function parsePartiesCsv(text: string): { parties: ImportedParty[]; errors: string[] } {
+  const rows = parseCsv(text);
+  const errors: string[] = [];
+  if (rows.length < 2) return { parties: [], errors: ["الملف فاضي"] };
+  const cols = rows[0].map((h) => PARTY_HEAD[h.trim().toLowerCase()]);
+  if (!cols.includes("name")) return { parties: [], errors: ["عمود ناقص: الاسم"] };
+  const parties: ImportedParty[] = [];
+  rows.slice(1).forEach((r, i) => {
+    const o: Record<string, string> = {};
+    cols.forEach((k, j) => k && (o[k] = (r[j] ?? "").trim()));
+    if (!o.name) return void errors.push(`سطر ${i + 2}: الاسم ناقص`);
+    const t = (o.type ?? "").toLowerCase();
+    const both = /الاتنين|الاثنين|both/.test(t), supplier = /مورد|supplier/.test(t);
+    parties.push({
+      code: o.code ?? "", name: o.name, phone: o.phone ?? "", taxNo: o.tax ?? "", address: o.address ?? "", email: o.email ?? "",
+      isCustomer: both || !supplier, isSupplier: both || supplier, creditLimit: toPiastres(o.limit ?? ""),
+    });
+  });
+  return { parties, errors };
 }
