@@ -4,6 +4,7 @@ directories:
   output: ../../release
 files:
   - dist/**
+  - build/icon.png
   - package.json
   - ui/**
 extraResources:
@@ -13,7 +14,11 @@ asar: true
 npmRebuild: true
 win:
   target: nsis
+  icon: build/icon.ico
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   oneClick: false
   perMachine: true
   allowToChangeInstallationDirectory: true

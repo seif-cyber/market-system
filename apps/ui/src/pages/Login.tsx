@@ -19,6 +19,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   return (
     <div className="center">
       <form className="card" onSubmit={(e) => { e.preventDefault(); api.setupOwner(name, pin).then(onDone).catch((x) => setErr(errMsg(x))); }}>
+        <img className="logo" src="./icon.svg" alt="" width={84} height={84} />
         <h2>إعداد أول مرة</h2>
         <p>اعمل حساب المالك. الـ PIN من 4 لـ 8 أرقام.</p>
         <label>اسم المالك<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
@@ -38,7 +39,7 @@ export function Login({ b, onDone }: { b: Bootstrap; onDone: () => void }) {
   return (
     <div className="center">
       <form className="card" onSubmit={(e) => { e.preventDefault(); api.login(uid, pin).then(onDone).catch((x) => { setErr(errMsg(x)); setPin(""); }); }}>
-        {b.brand.logo && <img className="logo" src={b.brand.logo} alt="" />}
+        <img className="logo" src={b.brand.logo || "./icon.svg"} alt="" width={b.brand.logo ? undefined : 84} height={b.brand.logo ? undefined : 84} />
         <h2>{b.brand.brand_name}</h2>
         <label>المستخدم
           <select value={uid} onChange={(e) => setUid(+e.target.value)}>{b.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>

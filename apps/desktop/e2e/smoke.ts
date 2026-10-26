@@ -33,7 +33,7 @@ page.on("console", (m: any) => m.type() === "error" && errors.push(m.text()));
 const root = fileURLToPath(new URL("../../ui/dist/", import.meta.url));
 const server = createServer((req, res) => {
   const f = root + (req.url === "/" ? "index.html" : req.url!.split("?")[0]);
-  try { res.setHeader("content-type", f.endsWith(".js") ? "text/javascript" : f.endsWith(".css") ? "text/css" : "text/html"); res.end(readFileSync(f)); }
+  try { res.setHeader("content-type", f.endsWith(".js") ? "text/javascript" : f.endsWith(".css") ? "text/css" : f.endsWith(".svg") ? "image/svg+xml" : "text/html"); res.end(readFileSync(f)); }
   catch { res.statusCode = 404; res.end(); }
 }).listen(0);
 await page.goto(`http://localhost:${(server.address() as any).port}/`);
@@ -41,6 +41,7 @@ await page.goto(`http://localhost:${(server.address() as any).port}/`);
 const shot = (n: string) => page.screenshot({ path: `${out}/${n}.png` });
 const tab = (t: string) => page.click(`nav >> text=${t}`);
 
+await shot("login");
 await page.selectOption("select", { label: "المدير" });
 await page.fill("input[type=password]", "1234");
 await page.click("form button.primary");

@@ -83,7 +83,7 @@ function start() {
 
   Menu.setApplicationMenu(null);
   win = new BrowserWindow({
-    width: 1366, height: 820, minWidth: 1000, minHeight: 640, autoHideMenuBar: true, show: false,
+    width: 1366, height: 820, minWidth: 1000, minHeight: 640, autoHideMenuBar: true, show: false, icon: join(__dirname, "../build/icon.png"),
     webPreferences: { preload: join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: dev },
   });
   win.once("ready-to-show", () => { win?.maximize(); win?.show(); });
