@@ -1,0 +1,25 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/kind-cannon-wcxb6i, main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build -w @market/ui
+      - name: Build installer
+        run: npm run dist -w @market/desktop
+        env:
+          # Public half of the license key pair (repo Settings > Secrets). The private key never goes here.
+          LICENSE_PUBLIC_KEY: ${{ secrets.LICENSE_PUBLIC_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MarketPOS-Setup
+          path: release/*.exe

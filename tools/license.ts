@@ -2,7 +2,7 @@
 //   tsx tools/license.ts keygen
 //   tsx tools/license.ts issue <deviceCode> "<customer>" <supermarket|restaurant|both> <days>
 import { generateKeyPairSync } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { issueLicense } from "@market/core";
 
 const PRIV = "keys/private.pem";
@@ -10,6 +10,7 @@ const PUB = "keys/public.pem";
 const [cmd, ...args] = process.argv.slice(2);
 
 if (cmd === "keygen") {
+  mkdirSync("keys", { recursive: true });
   if (existsSync(PRIV)) throw new Error(`${PRIV} exists; refusing to overwrite`);
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   writeFileSync(PRIV, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });

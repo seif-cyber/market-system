@@ -8,18 +8,15 @@ import { calcInvoice, chainHash, GENESIS_HASH, type LineInput } from "@market/co
 export type Db = Database.Database;
 export type Role = "owner" | "manager" | "cashier";
 
-const here = dirname(fileURLToPath(import.meta.url));
-
-export function openDb(path: string): Db {
+export function openDb(path: string, migrationsDir?: string): Db {
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  migrate(db);
+  migrate(db, migrationsDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"));
   return db;
 }
 
-function migrate(db: Db) {
-  const dir = join(here, "..", "migrations");
+function migrate(db: Db, dir: string) {
   const current = db.pragma("user_version", { simple: true }) as number;
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
   files.forEach((f, i) => {
@@ -115,4 +112,38 @@ export function createSale(
     }
     return { saleId, no, ...t };
   })();
+}
+
+// ---- lookups & bulk import ----
+export function listUsers(db: Db) {
+  return db.prepare("SELECT id,name,role FROM users WHERE active=1 ORDER BY id").all() as { id: number; name: string; role: Role }[];
+}
+
+export function searchProducts(db: Db, q: string, limit = 20) {
+  return db
+    .prepare("SELECT id,name,price,stock FROM products WHERE active=1 AND name LIKE ? ORDER BY name LIMIT ?")
+    .all(`%${q}%`, limit) as { id: number; name: string; price: number; stock: number }[];
+}
+
+/** Upsert by barcode: existing barcode updates name/price/cost and adds to stock. */
+export function importProducts(
+  db: Db,
+  rows: { barcode: string; name: string; price: number; cost: number; stock: number }[],
+) {
+  let created = 0, updated = 0;
+  db.transaction(() => {
+    for (const r of rows) {
+      const hit = db.prepare("SELECT product_id FROM barcodes WHERE code=?").get(r.barcode) as { product_id: number } | undefined;
+      if (hit) {
+        db.prepare("UPDATE products SET name=?, price=?, cost=?, stock=stock+? WHERE id=?").run(r.name, r.price, r.cost, r.stock, hit.product_id);
+        if (r.stock) db.prepare("INSERT INTO stock_movements(product_id,delta,reason,created_at) VALUES(?,?,?,?)").run(hit.product_id, r.stock, "purchase", Date.now());
+        updated++;
+      } else {
+        const id = addProduct(db, { name: r.name, price: r.price, cost: r.cost, stock: r.stock, barcodes: [r.barcode] });
+        if (r.stock) db.prepare("INSERT INTO stock_movements(product_id,delta,reason,created_at) VALUES(?,?,?,?)").run(id, r.stock, "purchase", Date.now());
+        created++;
+      }
+    }
+  })();
+  return { created, updated };
 }

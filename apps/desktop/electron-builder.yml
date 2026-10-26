@@ -1,0 +1,20 @@
+appId: com.marketsystem.pos
+productName: Market POS
+directories:
+  output: ../../release
+files:
+  - dist/**
+  - package.json
+  - ui/**
+extraResources:
+  - from: ../../packages/db/migrations
+    to: migrations
+asar: true
+npmRebuild: true
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  language: "1025"
