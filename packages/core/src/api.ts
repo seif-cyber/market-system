@@ -21,6 +21,13 @@ export interface BrandSettings {
 }
 
 export interface ShiftInfo { id: number; openedAt: number; openingCash: number }
+/** Cash the previous cashier counted at close: what the next cashier should find in the drawer. */
+export interface Handover { counted: number; cashier: string; closedAt: number }
+export interface ShiftHistoryRow {
+  id: number; cashier: string; openedAt: number; closedAt: number | null; openingCash: number;
+  totalSales: number; invoices: number; cashSales: number; cardSales: number; creditSales: number; returns: number;
+  expected: number; counted: number | null; difference: number | null;
+}
 
 export interface Bootstrap {
   users: { id: number; name: string; role: Role }[];
@@ -30,6 +37,7 @@ export interface Bootstrap {
   brand: BrandSettings;
   user: SessionUser | null;
   shift: ShiftInfo | null;
+  handover: Handover | null;
   demo: boolean;
 }
 
@@ -116,6 +124,8 @@ export interface Api {
   resetPin(userId: number, pin: string): Promise<void>;
 
   openShift(openingCash: number): Promise<ShiftInfo>;
+  shiftReport(): Promise<{ shift: ShiftInfo; summary: ShiftSummary } | null>;
+  listShifts(): Promise<ShiftHistoryRow[]>;
   closeShift(countedCash: number): Promise<CloseShiftResult>;
   holdCart(label: string, data: string): Promise<void>;
   listHeld(): Promise<HeldCart[]>;

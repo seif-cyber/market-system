@@ -110,8 +110,40 @@ await tab("البيع");
 await page.click("aside button >> text=إقفال الوردية");
 await page.fill(".modal input[type=number]", "5000");
 await page.click(".modal button.primary");
-await page.waitForSelector("text=تم إقفال الوردية");
+await page.waitForSelector("text=تم تسليم الوردية");
 await shot("shift-closed");
+await page.click(".modal button.primary >> text=تمام");
+
+// owner sees the shifts history
+await tab("الورديات"); await page.waitForSelector("td >> text=أحمد"); await shot("shifts-owner");
+
+// cashier: no analytics, handover flow
+await page.click("header >> text=خروج");
+await page.selectOption("select", { label: "منى" });
+await page.fill("input[type=password]", "2222");
+await page.click("form button.primary");
+await page.waitForSelector("nav");
+for (const hidden of ["لوحة التحكم", "الورديات", "المصاريف", "الإعدادات"]) if (await page.locator(`nav >> text=${hidden}`).count()) throw new Error("cashier sees " + hidden);
+await page.waitForSelector("text=سلّم الدرج");
+await shot("handover-open");
+await page.click("button >> text=استلمت الدرج وفتح الوردية");
+await page.waitForSelector(".scan");
+await page.fill(".scan", "6221001"); await page.press(".scan", "Enter");
+await page.click("button.primary >> text=نقدي");
+await page.waitForSelector("text=تمت الفاتورة رقم");
+await tab("المخزون");
+await page.waitForSelector("td >> text=شاي العروسة");
+if (await page.locator("th >> text=سعر الشراء").count()) throw new Error("cashier sees purchase price");
+await tab("البيع");
+await page.click("aside button >> text=إقفال الوردية");
+await page.waitForSelector("text=استلمت الدرج بـ");
+await page.waitForSelector("text=المفروض يكون في الدرج");
+await shot("handover-close");
+await page.fill(".modal input[type=number]", "1");
+await page.click(".modal button.primary");
+await page.waitForSelector("text=تم تسليم الوردية");
+await page.waitForSelector("text=عجز");
+await shot("handover-done");
 
 if (errors.length) throw new Error("browser errors:\n" + errors.join("\n"));
 console.log("E2E OK");

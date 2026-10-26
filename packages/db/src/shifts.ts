@@ -60,3 +60,30 @@ export function closeShift(db: Db, shiftId: number, countedCash: number, now = D
     return { summary, counted: countedCash, difference: countedCash - summary.expectedCash };
   })();
 }
+
+/** The most recently closed shift (anyone's): its counted cash is what the next cashier should receive. */
+export function lastClosedShift(db: Db) {
+  return db
+    .prepare("SELECT u.name cashier, sh.counted_cash counted, sh.closed_at closedAt FROM shifts sh JOIN users u ON u.id=sh.user_id WHERE sh.closed_at IS NOT NULL ORDER BY sh.closed_at DESC, sh.id DESC LIMIT 1")
+    .get() as { cashier: string; counted: number; closedAt: number } | undefined;
+}
+
+export interface ShiftHistoryRow {
+  id: number; cashier: string; openedAt: number; closedAt: number | null; openingCash: number;
+  totalSales: number; invoices: number; cashSales: number; cardSales: number; creditSales: number; returns: number;
+  expected: number; counted: number | null; difference: number | null;
+}
+
+/** Newest first; open shifts are included with null counted/difference. */
+export function shiftHistory(db: Db, limit = 100): ShiftHistoryRow[] {
+  const rows = db
+    .prepare("SELECT sh.id, u.name cashier, sh.opened_at openedAt, sh.closed_at closedAt, sh.opening_cash openingCash, sh.counted_cash counted FROM shifts sh JOIN users u ON u.id=sh.user_id ORDER BY sh.id DESC LIMIT ?")
+    .all(limit) as { id: number; cashier: string; openedAt: number; closedAt: number | null; openingCash: number; counted: number | null }[];
+  return rows.map((r) => {
+    const s = shiftSummary(db, r.id);
+    return {
+      ...r, totalSales: s.totalSales, invoices: s.invoices, cashSales: s.cashSales, cardSales: s.cardSales, creditSales: s.creditSales,
+      returns: s.cashReturns + s.cardReturns, expected: s.expectedCash, difference: r.counted === null ? null : r.counted - s.expectedCash,
+    };
+  });
+}

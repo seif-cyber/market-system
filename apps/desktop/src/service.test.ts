@@ -140,6 +140,37 @@ describe("service", () => {
     expect((await s.svc.bootstrap()).shift).toBeNull();
   });
 
+  it("cashier hands over a shift: sees opening, sales and expected drawer; next cashier receives the counted cash", async () => {
+    await cashierLogin();
+    await sell(s.svc); await sell(s.svc, { payMethod: "card" });
+    const rep = (await s.svc.shiftReport())!;
+    expect(rep.summary).toMatchObject({ openingCash: 5000, invoices: 2, totalSales: 10000, cashSales: 5000, cardSales: 5000, expectedCash: 10000 });
+    const r = await s.svc.closeShift(9800);
+    expect(r.difference).toBe(-200);
+    expect(await s.svc.shiftReport()).toBeNull();
+    expect((await s.svc.bootstrap()).handover).toMatchObject({ counted: 9800, cashier: "كاشير" });
+    // next cashier opens with a different amount than was handed over -> flagged in the audit log
+    await s.svc.openShift(9000);
+    const a = s.db.prepare("SELECT detail FROM audit_log WHERE action='shift_opened' ORDER BY id DESC LIMIT 1").get() as { detail: string };
+    expect(JSON.parse(a.detail)).toMatchObject({ openingCash: 9000, previousCounted: 9800, mismatch: -800 });
+  });
+
+  it("only managers see all shifts, analytics and purchase prices", async () => {
+    await cashierLogin();
+    await sell(s.svc);
+    await expect(s.svc.listShifts()).rejects.toThrow(/صلاحية/);
+    await expect(s.svc.analytics("today")).rejects.toThrow(/صلاحية/);
+    await expect(s.svc.listExpenses("today")).rejects.toThrow(/صلاحية/);
+    expect((await s.svc.listProducts("", "all"))[0].cost).toBe(0);
+    await s.svc.logout();
+    const owner = (await s.svc.bootstrap()).users.find((u) => u.role === "owner")!;
+    await s.svc.login(owner.id, "1234");
+    expect((await s.svc.listProducts("", "all"))[0].cost).toBe(4000);
+    const rows = await s.svc.listShifts();
+    expect(rows.some((r) => r.cashier === "كاشير" && r.totalSales === 5000 && r.closedAt === null)).toBe(true);
+    expect((await s.svc.analytics("today")).kpi.invoices).toBe(1);
+  });
+
   it("holds and resumes a cart per user", async () => {
     await ownerLogin();
     await s.svc.holdCart("زبون 1", '[{"id":1}]');

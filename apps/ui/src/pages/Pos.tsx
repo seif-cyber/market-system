@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Approval, Bootstrap, CloseShiftResult, Customer, HeldCart, ProductHit, SaleForReturn } from "@market/core";
+import type { Approval, Bootstrap, CloseShiftResult, Customer, HeldCart, ProductHit, SaleForReturn, ShiftSummary } from "@market/core";
 import { api, egp, errMsg, num, toPiastres } from "../api";
-import { dateTimeAr, PAY_LABEL } from "../fmt";
+import { dateTimeAr, fromPiastres, PAY_LABEL } from "../fmt";
 import { ApprovalFields, Modal, Toast, useToast } from "../components/ui";
 
 interface Line { p: ProductHit; qty: number }
@@ -16,7 +16,7 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
   const [discount, setDiscount] = useState(0);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tendered, setTendered] = useState("");
-  const [open, setOpen] = useState("0");
+  const [open, setOpen] = useState(fromPiastres(b.handover?.counted ?? 0));
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const locked = b.license.mode === "readonly";
@@ -83,18 +83,24 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
     return () => window.removeEventListener("keydown", k);
   });
 
-  if (!b.shift)
+  if (!b.shift) {
+    const h = b.handover;
+    const mismatch = h ? toPiastres(open) - h.counted : 0;
     return (
       <div className="center-box">
         <div className="card">
-          <h2>افتح الوردية</h2>
-          <p>اكتب المبلغ اللي في الدرج دلوقتي (رصيد الافتتاح).</p>
-          <label>رصيد الدرج (جنيه)<input type="number" min="0" value={open} onChange={(e) => setOpen(e.target.value)} autoFocus /></label>
-          <button className="primary big" onClick={() => api.openShift(toPiastres(open)).then(onChange).catch((e) => toast.fail(errMsg(e)))}>فتح الوردية</button>
+          <h2>استلام الدرج وفتح الوردية</h2>
+          {h ? (
+            <p>الكاشير السابق (<b>{h.cashier}</b>) سلّم الدرج بـ <b>{egp(h.counted)}</b> جنيه. عدّ الفلوس اللي قدامك وتأكد إنها بنفس المبلغ.</p>
+          ) : <p>اكتب المبلغ اللي في الدرج دلوقتي (رصيد الافتتاح).</p>}
+          <label>المبلغ اللي استلمته في الدرج (جنيه)<input type="number" min="0" value={open} onChange={(e) => setOpen(e.target.value)} autoFocus /></label>
+          {h && mismatch !== 0 && <div className="error">المبلغ مختلف عن اللي اتسلّم بـ {egp(Math.abs(mismatch))} ({mismatch < 0 ? "أقل" : "أكتر"}). الاختلاف هيتسجّل ويظهر للمدير.</div>}
+          <button className="primary big" onClick={() => api.openShift(toPiastres(open)).then(onChange).catch((e) => toast.fail(errMsg(e)))}>استلمت الدرج وفتح الوردية</button>
           <Toast msg={toast.msg} />
         </div>
       </div>
     );
+  }
 
   return (
     <div className="pos">
@@ -244,31 +250,47 @@ function ReturnDialog({ b, onClose }: { b: Bootstrap; onClose: () => void }) {
   );
 }
 
+function SummaryTable({ s }: { s: ShiftSummary }) {
+  return (
+    <table className="t"><tbody>
+      <tr><td>استلمت الدرج بـ</td><td>{egp(s.openingCash)}</td></tr>
+      <tr><td>عدد الفواتير</td><td>{num(s.invoices)}</td></tr>
+      <tr><td>إجمالي ما بعته</td><td><b>{egp(s.totalSales)}</b></td></tr>
+      <tr><td>— نقدي (دخل الدرج)</td><td>{egp(s.cashSales)}</td></tr>
+      <tr><td>— فيزا</td><td>{egp(s.cardSales)}</td></tr>
+      <tr><td>— آجل</td><td>{egp(s.creditSales)}</td></tr>
+      {s.debtPayments > 0 && <tr><td>تحصيل ديون نقدي</td><td>{egp(s.debtPayments)}</td></tr>}
+      {s.cashReturns > 0 && <tr><td>مرتجع دفعته نقدي</td><td>− {egp(s.cashReturns)}</td></tr>}
+      <tr className="sum"><td>المفروض يكون في الدرج</td><td><b>{egp(s.expectedCash)}</b></td></tr>
+    </tbody></table>
+  );
+}
+
 function CloseShiftDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [counted, setCounted] = useState("");
+  const [live, setLive] = useState<ShiftSummary | null>(null);
   const [res, setRes] = useState<CloseShiftResult | null>(null);
   const [err, setErr] = useState("");
+  useEffect(() => { api.shiftReport().then((r) => setLive(r?.summary ?? null)).catch((e) => setErr(errMsg(e))); }, []);
   const close = () => api.closeShift(toPiastres(counted)).then((r) => { setRes(r); api.print(r.reportHtml).catch(() => {}); }).catch((e) => setErr(errMsg(e)));
-  if (res) {
-    const s = res.summary;
+  const done = () => { onDone(); onClose(); };
+  if (res)
     return (
-      <Modal title="تم إقفال الوردية" onClose={() => { onDone(); onClose(); }}>
-        <table className="t"><tbody>
-          <tr><td>عدد الفواتير</td><td>{num(s.invoices)}</td></tr><tr><td>إجمالي المبيعات</td><td>{egp(s.totalSales)}</td></tr>
-          <tr><td>نقدي</td><td>{egp(s.cashSales)}</td></tr><tr><td>فيزا</td><td>{egp(s.cardSales)}</td></tr><tr><td>آجل</td><td>{egp(s.creditSales)}</td></tr>
-          <tr><td>المتوقع في الدرج</td><td>{egp(s.expectedCash)}</td></tr><tr><td>المعدود</td><td>{egp(res.counted)}</td></tr>
-        </tbody></table>
+      <Modal title="تم تسليم الوردية" onClose={done}>
+        <SummaryTable s={res.summary} />
+        <table className="t"><tbody><tr><td>اللي عديته في الدرج</td><td><b>{egp(res.counted)}</b></td></tr></tbody></table>
         <div className={res.difference === 0 ? "note up" : "error"}>{res.difference === 0 ? "الدرج مظبوط ✔" : res.difference > 0 ? `زيادة ${egp(res.difference)}` : `عجز ${egp(-res.difference)}`}</div>
-        <button className="primary" onClick={() => { onDone(); onClose(); }}>تمام</button>
+        <p className="muted">اتطبع تقرير التسليم. سلّم الدرج والتقرير للمدير أو الكاشير اللي بعدك.</p>
+        <button className="primary" onClick={done}>تمام</button>
       </Modal>
     );
-  }
   return (
-    <Modal title="إقفال الوردية" onClose={onClose}>
-      <p>عدّ الفلوس اللي في الدرج واكتب المبلغ. البرنامج هيقارنه بالمبيعات ويطبع تقرير الإقفال.</p>
-      <label>المبلغ اللي في الدرج (جنيه)<input autoFocus type="number" min="0" value={counted} onChange={(e) => setCounted(e.target.value)} /></label>
+    <Modal title="تسليم الوردية" onClose={onClose}>
+      {live && <SummaryTable s={live} />}
+      <p>عدّ الفلوس اللي في الدرج واكتب المبلغ. البرنامج هيقارنه بالمبيعات ويطبع تقرير التسليم.</p>
+      <label>المبلغ اللي عديته في الدرج (جنيه)<input autoFocus type="number" min="0" value={counted} onChange={(e) => setCounted(e.target.value)} /></label>
       {err && <div className="error">{err}</div>}
-      <button className="primary" disabled={counted === ""} onClick={close}>إقفال وطباعة التقرير</button>
+      <button className="primary" disabled={counted === ""} onClick={close}>تسليم الوردية وطباعة التقرير</button>
     </Modal>
   );
 }

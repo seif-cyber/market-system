@@ -41,11 +41,11 @@ function List({ canEdit }: { canEdit: boolean }) {
         {canEdit && <button className="primary" onClick={() => setEdit({ name: "", barcode: "", price: 0, cost: 0, minStock: 0, byWeight: false })}>+ صنف جديد</button>}
       </div>
       <table>
-        <thead><tr><th>الصنف</th><th>الباركود</th><th>سعر البيع</th><th>سعر الشراء</th><th>المخزون</th><th>الحد الأدنى</th>{canEdit && <th />}</tr></thead>
+        <thead><tr><th>الصنف</th><th>الباركود</th><th>سعر البيع</th>{canEdit && <th>سعر الشراء</th>}<th>المخزون</th><th>الحد الأدنى</th>{canEdit && <th />}</tr></thead>
         <tbody>
           {rows.map((p) => (
             <tr key={p.id}>
-              <td>{p.name}{p.byWeight && <small className="muted"> (بالوزن)</small>}</td><td className="mono">{p.barcode}</td><td>{egp(p.price)}</td><td>{egp(p.cost)}</td>
+              <td>{p.name}{p.byWeight && <small className="muted"> (بالوزن)</small>}</td><td className="mono">{p.barcode}</td><td>{egp(p.price)}</td>{canEdit && <td>{egp(p.cost)}</td>}
               <td className={p.stock <= 0 ? "down" : p.minStock > 0 && p.stock <= p.minStock ? "warn" : ""}>{num(p.stock)}</td><td>{num(p.minStock)}</td>
               {canEdit && <td><div className="row"><button onClick={() => setEdit(p)}>تعديل</button><button onClick={() => setCount(p)}>جرد</button></div></td>}
             </tr>

@@ -6,7 +6,7 @@ import {
 } from "@market/core";
 import {
   addCustomer, addExpense, addPayment, adjustStock, analytics, audit, closeShift, createReturn, createSale, createUser,
-  currentShift, deleteExpense, expiringBatches, findByBarcode, getCustomer, getSaleForReturn, getSetting, importProducts,
+  currentShift, deleteExpense, lastClosedShift, shiftHistory, shiftSummary, expiringBatches, findByBarcode, getCustomer, getSaleForReturn, getSetting, importProducts,
   listCustomers, listExpenses, listProducts, listUsers, loginWithPin, openShift, rangeFor, receiveStock, saveProduct,
   searchProducts, setCreditLimit, setPin, setSetting, setUserActive, statement, validateBackup, type Db,
 } from "@market/db";
@@ -127,7 +127,7 @@ export function createService(deps: Deps): Service {
       const users = listUsers(db);
       return {
         users, needsSetup: users.length === 0, license: license(), deviceCode: fingerprint, brand: brand(), user,
-        shift: user ? (currentShift(db, user.id) ?? null) : null, demo: deps.isDemo?.() ?? false,
+        shift: user ? (currentShift(db, user.id) ?? null) : null, handover: lastClosedShift(db) ?? null, demo: deps.isDemo?.() ?? false,
       };
     },
 
@@ -261,8 +261,19 @@ export function createService(deps: Deps): Service {
     async openShift(openingCash) {
       const u = need("cashier");
       const id = openShift(db, u.id, openingCash, now());
-      audit(db, u.id, "shift_opened", { id, openingCash });
+      const prev = lastClosedShift(db);
+      // Handover check: what the previous cashier counted vs what this one says they received.
+      audit(db, u.id, "shift_opened", { id, openingCash, previousCounted: prev?.counted ?? null, mismatch: prev ? openingCash - prev.counted : 0 });
       return currentShift(db, u.id)!;
+    },
+    async shiftReport() {
+      const u = need("cashier");
+      const sh = currentShift(db, u.id);
+      return sh ? { shift: sh, summary: shiftSummary(db, sh.id) } : null;
+    },
+    async listShifts() {
+      need("manager");
+      return shiftHistory(db, 100);
     },
     async closeShift(countedCash) {
       const u = need("cashier");
@@ -356,8 +367,9 @@ export function createService(deps: Deps): Service {
 
     // ---- inventory ----
     async listProducts(q, filter) {
-      need("cashier");
-      return listProducts(db, q, filter);
+      const u = need("cashier");
+      const rows = listProducts(db, q, filter);
+      return u.role === "cashier" ? rows.map((r) => ({ ...r, cost: 0 })) : rows; // purchase prices are for managers only
     },
     async saveProduct(p) {
       const u = need("manager");

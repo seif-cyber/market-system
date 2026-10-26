@@ -2,7 +2,7 @@
 export const API_METHODS = [
   "bootstrap", "setupOwner", "login", "logout", "saveSettings", "activate", "scan", "search",
   "checkout", "importCsv", "print", "addUser", "setUserActive", "resetPin",
-  "openShift", "closeShift", "holdCart", "listHeld", "resumeHeld", "deleteHeld",
+  "openShift", "shiftReport", "listShifts", "closeShift", "holdCart", "listHeld", "resumeHeld", "deleteHeld",
   "findSale", "createReturn",
   "listCustomers", "addCustomer", "setCreditLimit", "customerStatement", "receivePayment",
   "addExpense", "listExpenses", "deleteExpense",

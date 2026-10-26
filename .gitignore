@@ -8,3 +8,4 @@ keys/private*.pem
 .env
 /apps/desktop/ui/
 keys/
+apps/cloud/mock-data.json
