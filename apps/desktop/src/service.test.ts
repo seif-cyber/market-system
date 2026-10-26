@@ -149,10 +149,49 @@ describe("service", () => {
     expect(r.difference).toBe(-200);
     expect(await s.svc.shiftReport()).toBeNull();
     expect((await s.svc.bootstrap()).handover).toMatchObject({ counted: 9800, cashier: "كاشير" });
-    // next cashier opens with a different amount than was handed over -> flagged in the audit log
-    await s.svc.openShift(9000);
-    const a = s.db.prepare("SELECT detail FROM audit_log WHERE action='shift_opened' ORDER BY id DESC LIMIT 1").get() as { detail: string };
-    expect(JSON.parse(a.detail)).toMatchObject({ openingCash: 9000, previousCounted: 9800, mismatch: -800 });
+    // the opening amount is locked to what was handed over; changing it needs a reason and a manager's PIN
+    const owner = (await s.svc.bootstrap()).users.find((u) => u.role === "owner")!;
+    await expect(s.svc.openShift(9000)).rejects.toThrow(/سبب/);
+    await expect(s.svc.openShift(9000, undefined, "ناقص")).rejects.toThrow(/اعتماد/);
+    await expect(s.svc.openShift(9000, { userId: owner.id, pin: "0000" }, "ناقص")).rejects.toThrow(/غلط/);
+    await s.svc.openShift(9000, { userId: owner.id, pin: "1234" }, "ناقص 8 جنيه");
+    const adj = s.db.prepare("SELECT delta, approved_by, note FROM treasury_entries WHERE kind='handover_adjust'").get() as { delta: number; approved_by: number; note: string };
+    expect(adj).toMatchObject({ delta: -800, approved_by: owner.id, note: "ناقص 8 جنيه" });
+  });
+
+  it("treasury: managers see balances and move money; cashiers cannot; every automatic entry reconciles", async () => {
+    const { cashier } = await cashierLogin();
+    await sell(s.svc); await sell(s.svc, { payMethod: "card" });
+    await expect(s.svc.treasury()).rejects.toThrow(/صلاحية/);
+    await expect(s.svc.treasuryDeposit("cash", 100, "")).rejects.toThrow(/صلاحية/);
+    await s.svc.logout();
+    const owner = (await s.svc.bootstrap()).users.find((u) => u.role === "owner")!;
+    await s.svc.login(owner.id, "1234");
+    await s.svc.treasuryDeposit("cash", 100000, "رأس مال");
+    await s.svc.treasuryTransfer("cash", "bank", 30000, "إيداع");
+    await s.svc.addExpense("كهرباء", 2000, "", "bank");
+    expect(await s.svc.treasuryCount("cash", 80000, "جرد")).toBe(-(100000 + 5000 - 30000 - 80000));
+    const snap = await s.svc.treasury();
+    expect(snap).toMatchObject({ cash: 80000, bank: 5000 + 30000 - 2000, check: { ok: true } });
+    expect(snap.total).toBe(snap.cash + snap.bank);
+    expect(snap.net).toBe(snap.total + snap.receivables - snap.payables);
+    const entries = await s.svc.treasuryEntries({ account: "bank" });
+    expect(entries.map((x) => x.kind).sort()).toEqual(["expense", "sale", "transfer"]);
+    expect(cashier.id).toBeGreaterThan(0);
+  });
+
+  it("expenses can come out of the drawer (counts against the shift) or the bank; owner voids with a reversal", async () => {
+    await ownerLogin();
+    await sell(s.svc);
+    await s.svc.addExpense("نثريات", 1000, "", "cash", true);
+    await s.svc.addExpense("إنترنت", 500, "", "bank", false);
+    const rep = (await s.svc.shiftReport())!;
+    expect(rep.summary).toMatchObject({ payouts: 1000, expectedCash: 10000 + 5000 - 1000 });
+    const [net] = (await s.svc.listExpenses("today")).filter((e) => e.category === "إنترنت");
+    await s.svc.deleteExpense(net.id);
+    expect((await s.svc.treasury()).bank).toBe(0);
+    expect((await s.svc.listExpenses("today")).some((e) => e.id === net.id)).toBe(false);
+    expect((await s.svc.treasury()).check.ok).toBe(true);
   });
 
   it("only managers see all shifts, analytics and purchase prices", async () => {

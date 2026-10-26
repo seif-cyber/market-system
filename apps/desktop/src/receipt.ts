@@ -41,7 +41,7 @@ ${r.payMethod === "credit" ? `<tr><td>العميل</td><td class="n">${esc(r.cus
 
 export interface ShiftReportData {
   brand: BrandSettings; cashier: string; openedAt: number; closedAt: number;
-  summary: { openingCash: number; invoices: number; totalSales: number; cashSales: number; cardSales: number; creditSales: number; cashReturns: number; cardReturns: number; debtPayments: number; expectedCash: number };
+  summary: { openingCash: number; invoices: number; totalSales: number; cashSales: number; cardSales: number; creditSales: number; cashReturns: number; cardReturns: number; debtPayments: number; payouts: number; expectedCash: number };
   counted: number; difference: number;
 }
 
@@ -56,7 +56,7 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0}.n{text-align:left}hr
 <div class="c"><b style="font-size:16px">${esc(r.brand.brand_name)}</b><br>تقرير إقفال الوردية</div><hr>
 الكاشير: ${esc(r.cashier)}<br>فتح: ${new Date(r.openedAt).toLocaleString("ar-EG")}<br>قفل: ${new Date(r.closedAt).toLocaleString("ar-EG")}<hr>
 <table>${row("عدد الفواتير", 0).replace(egp(0), String(s.invoices))}${row("إجمالي المبيعات", s.totalSales)}${row("نقدي (داخل الدرج)", s.cashSales)}${row("فيزا", s.cardSales)}${row("آجل", s.creditSales)}
-${row("تحصيل ديون نقدي", s.debtPayments)}${row("مرتجع نقدي", s.cashReturns)}${row("مرتجع فيزا", s.cardReturns)}</table><hr>
+${row("تحصيل ديون نقدي", s.debtPayments)}${row("مرتجع نقدي", s.cashReturns)}${s.payouts ? row("مدفوعات من الدرج", s.payouts) : ""}${row("مرتجع فيزا", s.cardReturns)}</table><hr>
 <table>${row("رصيد الافتتاح", s.openingCash)}${row("المتوقع في الدرج", s.expectedCash)}${row("المعدود فعليًا", r.counted)}${row("الفرق: " + diff, Math.abs(r.difference), "t")}</table><hr>
 <div class="c">توقيع الكاشير: ____________</div></body></html>`;
 }

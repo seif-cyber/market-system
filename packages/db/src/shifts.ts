@@ -1,4 +1,5 @@
 import type { Db } from "./types";
+import { postEntry } from "./treasury";
 
 export interface ShiftSummaryRow {
   openingCash: number;
@@ -10,13 +11,27 @@ export interface ShiftSummaryRow {
   cashReturns: number;
   cardReturns: number;
   debtPayments: number; // cash collected from customers' debts
+  payouts: number;      // cash paid out of the drawer (expenses, suppliers)
   expectedCash: number;
 }
 
-export function openShift(db: Db, userId: number, openingCash: number, now = Date.now()): number {
-  if (openingCash < 0) throw new Error("مبلغ افتتاح غلط");
+/**
+ * The opening amount is locked to what the previous cashier counted. A different amount needs a manager's approval and
+ * is posted to the treasury as a handover adjustment (so the books always match the cash actually in the drawer).
+ * The very first shift has nothing to compare with: the float simply moves from the safe to the drawer.
+ */
+export function openShift(db: Db, userId: number, openingCash: number, now = Date.now(), opts: { approvedBy?: number; reason?: string } = {}): number {
+  if (!Number.isInteger(openingCash) || openingCash < 0) throw new Error("مبلغ افتتاح غلط");
   if (currentShift(db, userId)) throw new Error("فيه وردية مفتوحة بالفعل");
-  return Number(db.prepare("INSERT INTO shifts(user_id,opened_at,opening_cash) VALUES(?,?,?)").run(userId, now, openingCash).lastInsertRowid);
+  return db.transaction(() => {
+    const prev = lastClosedShift(db);
+    const diff = prev ? openingCash - prev.counted : 0;
+    if (diff !== 0 && !opts.approvedBy) throw new Error("المبلغ لازم يساوي اللي اتسلّم من الوردية السابقة، أو يعتمده المدير");
+    const id = Number(db.prepare("INSERT INTO shifts(user_id,opened_at,opening_cash) VALUES(?,?,?)").run(userId, now, openingCash).lastInsertRowid);
+    if (diff !== 0)
+      postEntry(db, { account: "cash", delta: diff, kind: "handover_adjust", refTable: "shifts", refId: id, shiftId: id, userId, approvedBy: opts.approvedBy, note: opts.reason || "تعديل مبلغ استلام الدرج", createdAt: now });
+    return id;
+  })();
 }
 
 export function currentShift(db: Db, userId: number) {
@@ -43,21 +58,27 @@ export function shiftSummary(db: Db, shiftId: number): ShiftSummaryRow {
   ).get(shiftId) as any;
   const p = db.prepare("SELECT COALESCE(SUM(-delta),0) v FROM customer_ledger WHERE shift_id=? AND kind='payment' AND method='cash'").get(shiftId) as any;
   const cashSales = s.cash + s.creditPaid;
+  // Single source of truth: everything that moved through this drawer is in the treasury ledger.
+  const drawer = db.prepare("SELECT COALESCE(SUM(delta),0) v FROM treasury_entries WHERE shift_id=? AND in_drawer=1 AND account='cash'").get(shiftId) as { v: number };
+  const out = db.prepare("SELECT COALESCE(SUM(-delta),0) v FROM treasury_entries WHERE shift_id=? AND in_drawer=1 AND kind IN ('expense','expense_void','supplier_payment')").get(shiftId) as { v: number };
   return {
     openingCash: sh.openingCash, invoices: s.n, totalSales: s.total, cashSales, cardSales: s.card, creditSales: s.credit,
-    cashReturns: r.cash, cardReturns: r.card, debtPayments: p.v,
-    expectedCash: sh.openingCash + cashSales + p.v - r.cash,
+    cashReturns: r.cash, cardReturns: r.card, debtPayments: p.v, payouts: out.v,
+    expectedCash: sh.openingCash + drawer.v,
   };
 }
 
 export function closeShift(db: Db, shiftId: number, countedCash: number, now = Date.now()) {
   if (countedCash < 0) throw new Error("المبلغ المعدود غلط");
   return db.transaction(() => {
-    const open = db.prepare("SELECT id FROM shifts WHERE id=? AND closed_at IS NULL").get(shiftId);
+    const open = db.prepare("SELECT id, user_id FROM shifts WHERE id=? AND closed_at IS NULL").get(shiftId) as { id: number; user_id: number } | undefined;
     if (!open) throw new Error("الوردية مقفولة بالفعل");
     const summary = shiftSummary(db, shiftId);
     db.prepare("UPDATE shifts SET closed_at=?, counted_cash=?, expected_cash=? WHERE id=?").run(now, countedCash, summary.expectedCash, shiftId);
-    return { summary, counted: countedCash, difference: countedCash - summary.expectedCash };
+    const difference = countedCash - summary.expectedCash;
+    // A shortage or surplus is real money missing from / extra in the treasury, booked on the closing cashier.
+    postEntry(db, { account: "cash", delta: difference, kind: "shift_diff", refTable: "shifts", refId: shiftId, shiftId, userId: open.user_id, createdAt: now });
+    return { summary, counted: countedCash, difference };
   })();
 }
 

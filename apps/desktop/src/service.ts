@@ -6,7 +6,7 @@ import {
 } from "@market/core";
 import {
   addCustomer, addExpense, addPayment, adjustStock, analytics, audit, closeShift, createReturn, createSale, createUser,
-  currentShift, deleteExpense, lastClosedShift, shiftHistory, shiftSummary, expiringBatches, findByBarcode, getCustomer, getSaleForReturn, getSetting, importProducts,
+  balances, countAdjust, currentShift, deposit, lastClosedShift, listEntries, totalReceivables, transfer, verifyTreasury, voidExpense, withdraw, shiftHistory, shiftSummary, expiringBatches, findByBarcode, getCustomer, getSaleForReturn, getSetting, importProducts,
   listCustomers, listExpenses, listProducts, listUsers, loginWithPin, openShift, rangeFor, receiveStock, saveProduct,
   searchProducts, setCreditLimit, setPin, setSetting, setUserActive, statement, validateBackup, type Db,
 } from "@market/db";
@@ -258,10 +258,17 @@ export function createService(deps: Deps): Service {
     },
 
     // ---- shifts ----
-    async openShift(openingCash) {
+    async openShift(openingCash, approval, reason) {
       const u = need("cashier");
-      const id = openShift(db, u.id, openingCash, now());
       const prev = lastClosedShift(db);
+      let approvedBy: number | undefined;
+      if (prev && openingCash !== prev.counted) {
+        // Locked to the handed-over amount; changing it takes a manager and a reason (booked on the treasury).
+        if (!reason?.trim()) throw new Error("اكتب سبب الاختلاف عن المبلغ المتسلّم");
+        const a = authorize("manager", approval);
+        approvedBy = a.approvedBy ?? a.actor.id;
+      }
+      const id = openShift(db, u.id, openingCash, now(), { approvedBy, reason: reason?.trim() });
       // Handover check: what the previous cashier counted vs what this one says they received.
       audit(db, u.id, "shift_opened", { id, openingCash, previousCounted: prev?.counted ?? null, mismatch: prev ? openingCash - prev.counted : 0 });
       return currentShift(db, u.id)!;
@@ -350,19 +357,20 @@ export function createService(deps: Deps): Service {
     },
 
     // ---- expenses ----
-    async addExpense(category, amount, note) {
+    async addExpense(category, amount, note, paidFrom, fromDrawer) {
       const u = need("manager");
-      addExpense(db, { category, amount, note, userId: u.id, createdAt: now() });
+      const shift = fromDrawer ? requireShift(u) : undefined;
+      addExpense(db, { category, amount, note, userId: u.id, createdAt: now(), paidFrom: paidFrom ?? "cash", fromDrawer: !!fromDrawer, shiftId: shift?.id });
     },
     async listExpenses(range) {
       need("manager");
       const r = rangeFor(range, now());
-      return listExpenses(db, r.from, r.to);
+      return listExpenses(db, r.from, r.to).map((e) => ({ ...e, fromDrawer: !!e.fromDrawer }));
     },
     async deleteExpense(id) {
       const u = need("owner");
-      deleteExpense(db, id);
-      audit(db, u.id, "expense_deleted", { id });
+      voidExpense(db, id, u.id, now());
+      audit(db, u.id, "expense_voided", { id });
     },
 
     // ---- inventory ----
@@ -397,6 +405,40 @@ export function createService(deps: Deps): Service {
     async analytics(range) {
       need("manager");
       return analytics(db, rangeFor(range, now()), now(), Number(brand().expiry_alert_days) || 30);
+    },
+
+    // ---- treasury (owner and manager) ----
+    async treasury() {
+      need("manager");
+      const b = balances(db);
+      const receivables = totalReceivables(db), payables = 0;
+      return { ...b, receivables, payables, net: b.total + receivables - payables, check: verifyTreasury(db) };
+    },
+    async treasuryEntries(f) {
+      need("manager");
+      const range = f?.range && f.range !== "all" ? rangeFor(f.range, now()) : undefined;
+      return listEntries(db, { account: f?.account, kind: f?.kind, from: range?.from, to: range?.to, limit: 400 });
+    },
+    async treasuryDeposit(account, amount, note) {
+      const u = need("manager");
+      deposit(db, { account, amount, userId: u.id, note, createdAt: now() });
+      audit(db, u.id, "treasury_deposit", { account, amount });
+    },
+    async treasuryWithdraw(account, amount, note) {
+      const u = need("manager");
+      withdraw(db, { account, amount, userId: u.id, note, createdAt: now() });
+      audit(db, u.id, "treasury_withdraw", { account, amount });
+    },
+    async treasuryTransfer(from, to, amount, note) {
+      const u = need("manager");
+      transfer(db, { from, to, amount, userId: u.id, note, createdAt: now() });
+      audit(db, u.id, "treasury_transfer", { from, to, amount });
+    },
+    async treasuryCount(account, counted, note) {
+      const u = need("manager");
+      const diff = countAdjust(db, { account, counted, userId: u.id, note, createdAt: now() });
+      audit(db, u.id, "treasury_count", { account, counted, diff });
+      return diff;
     },
 
     async backupNow() {

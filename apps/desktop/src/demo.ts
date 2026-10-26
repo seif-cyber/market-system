@@ -1,6 +1,6 @@
 import {
-  addCustomer, addExpense, addPayment, adjustStock, closeShift, createReturn, createSale, createUser, getCustomer,
-  getSaleForReturn, openShift, receiveStock, saveProduct, setSetting, shiftSummary, type Db,
+  addCustomer, addExpense, addPayment, adjustStock, closeShift, createReturn, createSale, createUser, deposit, getCustomer,
+  getSaleForReturn, lastClosedShift, openShift, receiveStock, saveProduct, setSetting, shiftSummary, transfer, withdraw, type Db,
 } from "@market/db";
 
 const DAY = 86_400_000, HOUR = 3_600_000;
@@ -69,6 +69,10 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
   const today0 = startToday.getTime();
 
+  // Starting capital, before the first day.
+  deposit(db, { account: "cash", amount: 15_000_000, userId: owner, note: "رأس المال", createdAt: today0 - (days + 1) * DAY });
+  deposit(db, { account: "bank", amount: 10_000_000, userId: owner, note: "رأس المال", createdAt: today0 - (days + 1) * DAY });
+
   for (let d = days; d >= 0; d--) {
     const day0 = today0 - d * DAY;
     const dow = new Date(day0).getDay(); // 5 = Fri, 6 = Sat
@@ -78,7 +82,7 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
       const hours = Object.keys(HOUR_W).map(Number).filter((h) => h >= h0 && h <= h1 && day0 + h * HOUR < now);
       if (!hours.length) continue;
       const opened = day0 + h0 * HOUR - 10 * 60_000;
-      const shiftId = openShift(db, cashier, 200000, opened);
+      const shiftId = openShift(db, cashier, lastClosedShift(db)?.counted ?? 200000, opened); // locked to the handed-over cash
       const share = hours.reduce((s, h) => s + HOUR_W[h], 0) / 118;
       const n = Math.round(target * share);
       const times = Array.from({ length: n }, () => {
@@ -86,6 +90,8 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
         return day0 + h * HOUR + Math.floor(r() * HOUR);
       }).filter((t) => t < now).sort((a, b) => a - b);
 
+      if (r() < 0.2 && opened + 30 * 60_000 < now)
+        addExpense(db, { category: "نثريات", amount: Math.round((30 + r() * 120) * 100), userId: cashier, paidFrom: "cash", fromDrawer: true, shiftId, createdAt: opened + 30 * 60_000, note: "من الدرج" });
       for (const ts of times) {
         const nLines = weighted([1, 2, 3, 4, 5, 6, 7], (k) => 9 - k);
         const lines = new Map<number, number>();
@@ -132,12 +138,16 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
       }
     }
     const dom = new Date(day0).getDate();
-    const exp = (category: string, egp: number, note = "") => addExpense(db, { category, amount: egp * 100, note, userId: owner, createdAt: day0 + 10 * HOUR });
-    if (dom === 1) exp("إيجار", 8000);
-    if (dom === 5) exp("كهرباء", 1800 + Math.round(r() * 400));
-    if (dom === 10) exp("إنترنت وتليفون", 450);
+    const exp = (category: string, egp: number, note = "", paidFrom: "cash" | "bank" = "cash") =>
+      addExpense(db, { category, amount: egp * 100, note, userId: owner, createdAt: day0 + 10 * HOUR, paidFrom });
+    if (dom === 1) exp("إيجار", 8000, "", "bank");
+    if (dom === 5) exp("كهرباء", 1800 + Math.round(r() * 400), "", "bank");
+    if (dom === 10) exp("إنترنت وتليفون", 450, "", "bank");
     if (dom === 28) exp("مرتبات", 15000, "مرتبات العمال");
-    if (r() < 0.3) exp("نثريات", 50 + Math.round(r() * 350));
+    if (r() < 0.15) exp("نثريات", 50 + Math.round(r() * 350));
+    // Cash pays into the bank every Saturday; the owner draws money on the 15th.
+    if (dow === 6 && d > 0) transfer(db, { from: "cash", to: "bank", amount: 2_000_000, userId: owner, note: "إيداع في البنك", createdAt: day0 + 22 * HOUR });
+    if (dom === 15 && d > 0) withdraw(db, { account: "cash", amount: 1_500_000, userId: owner, note: "مسحوبات المالك", createdAt: day0 + 20 * HOUR });
   }
 
   // Final stock: realistic levels, a few low/out, near-expiry dairy.
@@ -151,7 +161,7 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
       db.prepare("INSERT INTO batches(product_id,qty,expiry,created_at) VALUES(?,?,?,?)").run(p.id, qty, now + offset * DAY, now);
   }
   // Pre-open a shift for the demo owner so the register is usable immediately.
-  openShift(db, owner, 100000, now);
+  openShift(db, owner, lastClosedShift(db)?.counted ?? 100000, now);
   setSetting(db, "demo_seeded_at", String(now));
   return { ownerId: owner };
 }

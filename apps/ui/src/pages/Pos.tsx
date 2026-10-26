@@ -17,6 +17,9 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tendered, setTendered] = useState("");
   const [open, setOpen] = useState(fromPiastres(b.handover?.counted ?? 0));
+  const [custom, setCustom] = useState(false);
+  const [reason, setReason] = useState("");
+  const [openApproval, setOpenApproval] = useState<Approval | null>(null);
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const locked = b.license.mode === "readonly";
@@ -93,9 +96,27 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
           {h ? (
             <p>الكاشير السابق (<b>{h.cashier}</b>) سلّم الدرج بـ <b>{egp(h.counted)}</b> جنيه. عدّ الفلوس اللي قدامك وتأكد إنها بنفس المبلغ.</p>
           ) : <p>اكتب المبلغ اللي في الدرج دلوقتي (رصيد الافتتاح).</p>}
-          <label>المبلغ اللي استلمته في الدرج (جنيه)<input type="number" min="0" value={open} onChange={(e) => setOpen(e.target.value)} autoFocus /></label>
-          {h && mismatch !== 0 && <div className="error">المبلغ مختلف عن اللي اتسلّم بـ {egp(Math.abs(mismatch))} ({mismatch < 0 ? "أقل" : "أكتر"}). الاختلاف هيتسجّل ويظهر للمدير.</div>}
-          <button className="primary big" onClick={() => api.openShift(toPiastres(open)).then(onChange).catch((e) => toast.fail(errMsg(e)))}>استلمت الدرج وفتح الوردية</button>
+          {h && !custom ? (
+            <>
+              <div className="total"><div className="row between"><span>المبلغ المتسلّم</span><b>{egp(h.counted)}</b></div></div>
+              <button className="primary big" onClick={() => api.openShift(h.counted).then(onChange).catch((e) => toast.fail(errMsg(e)))}>استلمت الدرج وفتح الوردية</button>
+              <button className="link" onClick={() => setCustom(true)}>المبلغ اللي في الدرج مختلف؟</button>
+            </>
+          ) : (
+            <>
+              <label>المبلغ اللي في الدرج (جنيه)<input type="number" min="0" value={open} onChange={(e) => setOpen(e.target.value)} autoFocus /></label>
+              {h && mismatch !== 0 && (
+                <>
+                  <div className="error">مختلف عن اللي اتسلّم بـ {egp(Math.abs(mismatch))} ({mismatch < 0 ? "أقل" : "أكتر"}). التغيير بيتسجّل على الخزنة وبيحتاج اعتماد المدير وسبب.</div>
+                  <label>السبب<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+                  <ApprovalFields b={b} value={openApproval} onChange={setOpenApproval} />
+                </>
+              )}
+              <button className="primary big" disabled={!!h && mismatch !== 0 && (!reason.trim() || (b.user?.role === "cashier" && !openApproval?.pin))}
+                onClick={() => api.openShift(toPiastres(open), openApproval ?? undefined, reason || undefined).then(onChange).catch((e) => toast.fail(errMsg(e)))}>استلمت الدرج وفتح الوردية</button>
+              {h && <button className="link" onClick={() => { setCustom(false); setOpen(fromPiastres(h.counted)); }}>رجوع للمبلغ المتسلّم</button>}
+            </>
+          )}
           <Toast msg={toast.msg} />
         </div>
       </div>
@@ -261,6 +282,7 @@ function SummaryTable({ s }: { s: ShiftSummary }) {
       <tr><td>— آجل</td><td>{egp(s.creditSales)}</td></tr>
       {s.debtPayments > 0 && <tr><td>تحصيل ديون نقدي</td><td>{egp(s.debtPayments)}</td></tr>}
       {s.cashReturns > 0 && <tr><td>مرتجع دفعته نقدي</td><td>− {egp(s.cashReturns)}</td></tr>}
+      {s.payouts > 0 && <tr><td>مدفوعات من الدرج (مصاريف)</td><td>− {egp(s.payouts)}</td></tr>}
       <tr className="sum"><td>المفروض يكون في الدرج</td><td><b>{egp(s.expectedCash)}</b></td></tr>
     </tbody></table>
   );

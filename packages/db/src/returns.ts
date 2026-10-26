@@ -1,4 +1,5 @@
 import type { Db } from "./types";
+import { postEntry } from "./treasury";
 
 export function getSaleForReturn(db: Db, no: number) {
   const s = db
@@ -51,6 +52,8 @@ export function createReturn(
       db.prepare("UPDATE products SET stock=stock+? WHERE id=?").run(p.qty, p.item.product_id);
       db.prepare("INSERT INTO stock_movements(product_id,delta,reason,ref_id,created_at) VALUES(?,?,?,?,?)").run(p.item.product_id, p.qty, "return", rid, now);
     }
+    if (method !== "credit")
+      postEntry(db, { account: method === "card" ? "bank" : "cash", delta: -total, kind: "sale_return", refTable: "returns", refId: rid, shiftId: i.shiftId, inDrawer: method === "cash", userId: i.userId, approvedBy: i.approvedBy, createdAt: now });
     if (method === "credit" && sale.customer_id)
       db.prepare("INSERT INTO customer_ledger(customer_id,delta,kind,ref_id,user_id,note,created_at) VALUES(?,?,?,?,?,?,?)")
         .run(sale.customer_id, -total, "adjust", rid, i.userId, `مرتجع فاتورة ${sale.no}`, now);

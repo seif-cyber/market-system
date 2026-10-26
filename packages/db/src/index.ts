@@ -7,6 +7,7 @@ import { calcInvoice, chainHash, GENESIS_HASH, type LineInput } from "@market/co
 
 import type { Db, Role } from "./types";
 import { consumeBatches } from "./inventory";
+import { postSalePayment } from "./treasury";
 export type { Db, Role } from "./types";
 export * from "./shifts";
 export * from "./customers";
@@ -14,6 +15,7 @@ export * from "./inventory";
 export * from "./returns";
 export * from "./expenses";
 export * from "./analytics";
+export * from "./treasury";
 
 export function openDb(path: string, migrationsDir?: string): Db {
   const db = new Database(path);
@@ -144,6 +146,7 @@ export function createSale(db: Db, input: SaleInput) {
     if (t.total - paid > 0)
       db.prepare("INSERT INTO customer_ledger(customer_id,delta,kind,ref_id,shift_id,user_id,created_at) VALUES(?,?,?,?,?,?,?)")
         .run(input.customerId, t.total - paid, "sale", saleId, input.shiftId ?? null, input.userId, createdAt);
+    postSalePayment(db, { payMethod: input.payMethod, total: t.total, paid, saleId, shiftId: input.shiftId, userId: input.userId, createdAt });
     return { saleId, no, ...t, paid };
   })();
 }

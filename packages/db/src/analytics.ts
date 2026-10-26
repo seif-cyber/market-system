@@ -1,6 +1,8 @@
 import { chainHash, GENESIS_HASH, type Analytics } from "@market/core";
 import type { Db } from "./types";
 import { expiringBatches } from "./inventory";
+import { balances, verifyTreasury } from "./treasury";
+import { totalReceivables } from "./customers";
 
 export type RangePreset = "today" | "7d" | "30d" | "month";
 const DAY = 86_400_000;
@@ -48,7 +50,7 @@ export function analytics(db: Db, range: { from: number; to: number }, now = Dat
   const cogsSold = one<{ v: number }>(db, "SELECT COALESCE(SUM(si.cost*si.qty),0) v FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.created_at BETWEEN ? AND ?", from, to).v;
   const cogsBack = one<{ v: number }>(db, "SELECT COALESCE(SUM(ri.cost),0) v FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.created_at BETWEEN ? AND ?", from, to).v;
   const grossProfit = Math.round(cur.netExTax - (cogsSold - cogsBack));
-  const expenses = one<{ v: number }>(db, "SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE created_at BETWEEN ? AND ?", from, to).v;
+  const expenses = one<{ v: number }>(db, "SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE voided=0 AND created_at BETWEEN ? AND ?", from, to).v;
 
   // daily net sales (sales minus refunds), zero-filled
   const dayMap = new Map<string, number>();
@@ -96,7 +98,7 @@ export function analytics(db: Db, range: { from: number; to: number }, now = Dat
   ).filter((c) => c.invoices > 0 || c.returns > 0 || c.cashDiff !== 0).sort((a, b) => b.sales - a.sales);
 
   const payments = all<{ method: string; total: number }>(db, "SELECT pay_method method, SUM(total) total FROM sales WHERE created_at BETWEEN ? AND ? GROUP BY pay_method ORDER BY total DESC", from, to);
-  const expensesByCategory = all<{ category: string; total: number }>(db, "SELECT category, SUM(amount) total FROM expenses WHERE created_at BETWEEN ? AND ? GROUP BY category ORDER BY total DESC", from, to);
+  const expensesByCategory = all<{ category: string; total: number }>(db, "SELECT category, SUM(amount) total FROM expenses WHERE voided=0 AND created_at BETWEEN ? AND ? GROUP BY category ORDER BY total DESC", from, to);
   const lowStock = all<Analytics["lowStock"][number]>(db, "SELECT id, name, stock, min_stock minStock FROM products WHERE active=1 AND min_stock>0 AND stock<=min_stock ORDER BY stock/min_stock LIMIT 10");
 
   const debtRows = all<{ name: string; balance: number }>(
@@ -113,5 +115,7 @@ export function analytics(db: Db, range: { from: number; to: number }, now = Dat
     expiring: expiringBatches(db, alertDays, now, 10),
     debts: { total: debtRows.reduce((s, r) => s + r.balance, 0), top: debtRows.slice(0, 5) },
     integrity: verifySalesChain(db),
+    position: { ...balances(db), receivables: totalReceivables(db), payables: 0 },
+    treasuryCheck: (({ ok, mismatches }) => ({ ok, mismatches: mismatches.length }))(verifyTreasury(db)),
   };
 }

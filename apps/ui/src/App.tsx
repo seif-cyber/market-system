@@ -9,9 +9,10 @@ import { Customers } from "./pages/Customers";
 import { Expenses } from "./pages/Expenses";
 import { Settings } from "./pages/Settings";
 import { Shifts } from "./pages/Shifts";
+import { Treasury } from "./pages/Treasury";
 import { SupportButton } from "./components/ui";
 
-type Tab = "pos" | "dash" | "shifts" | "inv" | "cust" | "exp" | "set";
+type Tab = "pos" | "dash" | "shifts" | "treasury" | "inv" | "cust" | "exp" | "set";
 
 export function App() {
   const [b, setB] = useState<Bootstrap | null>(null);
@@ -30,7 +31,7 @@ export function App() {
   const owner = b.user.role === "owner";
   const lic = b.license;
   const tabs: [Tab, string, boolean][] = [
-    ["pos", "البيع", true], ["dash", "لوحة التحكم", manager], ["shifts", "الورديات", manager], ["inv", "المخزون", true],
+    ["pos", "البيع", true], ["dash", "لوحة التحكم", manager], ["shifts", "الورديات", manager], ["treasury", "الخزنة", manager], ["inv", "المخزون", true],
     ["cust", "العملاء", true], ["exp", "المصاريف", manager], ["set", "الإعدادات", manager],
   ];
   const active = tabs.find((t) => t[0] === tab && t[2]) ? tab : "pos";
@@ -57,9 +58,10 @@ export function App() {
         {active === "pos" && <Pos b={b} onChange={reload} />}
         {active === "dash" && <Dashboard />}
         {active === "shifts" && <Shifts />}
+        {active === "treasury" && <Treasury />}
         {active === "inv" && <Inventory canEdit={manager} />}
         {active === "cust" && <Customers canManage={manager} />}
-        {active === "exp" && <Expenses isOwner={owner} />}
+        {active === "exp" && <Expenses isOwner={owner} hasShift={!!b.shift} />}
         {active === "set" && <Settings b={b} onChange={reload} />}
       </main>
     </div>

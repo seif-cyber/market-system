@@ -49,6 +49,15 @@ export function DashboardView({ a, range, onRange, syncedAt }: { a: Analytics; r
         {syncedAt ? <div className="muted">آخر تحديث من المحل {ago(syncedAt)}</div> : null}
       </div>
 
+      {a.position && (
+        <div className="kpis position">
+          <Kpi label="💵 كاش" value={egp0(a.position.cash)} />
+          <Kpi label="🏦 بنك / فيزا" value={egp0(a.position.bank)} />
+          <Kpi label="الإجمالي المتاح" value={egp0(a.position.total)} tone="good" sub={a.treasuryCheck?.ok === false ? "⚠ فيه فرق في الخزنة، راجع صفحة الخزنة" : "الخزنة مطابقة ✔"} />
+          <Kpi label="لينا عند العملاء" value={egp0(a.position.receivables)} sub={a.position.payables ? `علينا للموردين ${egp0(a.position.payables)}` : undefined} />
+        </div>
+      )}
+
       <div className="kpis">
         <Kpi label="صافي المبيعات" value={egp0(k.netSales)} sub={<Delta cur={k.netSales} prev={k.prevNetSales} />} />
         <Kpi label="عدد الفواتير" value={num(k.invoices)} sub={`متوسط الفاتورة ${egp0(k.avgBasket)}`} />

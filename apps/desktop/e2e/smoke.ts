@@ -95,6 +95,13 @@ await tab("العملاء"); await page.waitForSelector("tr.click"); await shot(
 await page.click("tr.click >> nth=0"); await page.waitForSelector("text=كشف حساب"); await shot("statement");
 await page.keyboard.press("Escape");
 await tab("المصاريف"); await page.waitForSelector("td:has-text('إيجار')"); await shot("expenses");
+await tab("الخزنة");
+await page.waitForSelector("text=الإجمالي المتاح"); await page.waitForSelector("text=الخزنة مطابقة لسجلات"); await shot("treasury");
+await page.click("button >> text=+ إيداع");
+await page.fill(".modal input[type=number]", "1000");
+await page.click(".modal button.primary");
+await page.waitForSelector("text=اتسجّل الإيداع");
+await page.waitForSelector("text=الخزنة مطابقة لسجلات");
 await tab("الإعدادات");
 await page.waitForSelector("text=متابعة المبيعات من الموبايل"); await shot("settings");
 
@@ -127,7 +134,12 @@ await page.waitForSelector("nav");
 for (const hidden of ["لوحة التحكم", "الورديات", "المصاريف", "الإعدادات"]) if (await page.locator(`nav >> text=${hidden}`).count()) throw new Error("cashier sees " + hidden);
 await page.waitForSelector("text=سلّم الدرج");
 await shot("handover-open");
-await page.click("button >> text=استلمت الدرج وفتح الوردية");
+await page.click("text=المبلغ اللي في الدرج مختلف؟");
+await page.fill("label:has-text('المبلغ اللي في الدرج') input", "1");
+await page.fill("label:has-text('السبب') input", "ناقص");
+await page.fill(".approval input[type=password]", "1234");
+await shot("handover-change");
+await page.click("button.primary >> text=استلمت الدرج وفتح الوردية");
 await page.waitForSelector(".scan");
 await page.fill(".scan", "6221001"); await page.press(".scan", "Enter");
 await page.click("button.primary >> text=نقدي");

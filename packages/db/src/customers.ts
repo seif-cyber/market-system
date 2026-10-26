@@ -1,4 +1,5 @@
 import type { Db } from "./types";
+import { postEntry } from "./treasury";
 
 export interface CustomerRow { id: number; name: string; phone: string; creditLimit: number; balance: number }
 
@@ -8,6 +9,11 @@ export function listCustomers(db: Db, q = ""): CustomerRow[] {
   return db
     .prepare(`SELECT c.id, c.name, c.phone, c.credit_limit AS creditLimit, ${BAL} AS balance FROM customers c WHERE c.active=1 AND (c.name LIKE ? OR c.phone LIKE ?) ORDER BY c.name LIMIT 200`)
     .all(`%${q}%`, `%${q}%`) as CustomerRow[];
+}
+
+/** What customers owe us in total (only positive balances). */
+export function totalReceivables(db: Db): number {
+  return (db.prepare("SELECT COALESCE(SUM(b),0) v FROM (SELECT SUM(delta) b FROM customer_ledger GROUP BY customer_id HAVING b>0)").get() as { v: number }).v;
 }
 
 export function getCustomer(db: Db, id: number): CustomerRow | undefined {
@@ -29,8 +35,12 @@ export function addPayment(db: Db, p: { customerId: number; amount: number; meth
     const c = getCustomer(db, p.customerId);
     if (!c) throw new Error("العميل غير موجود");
     if (p.amount > c.balance) throw new Error("المبلغ أكبر من المديونية");
-    db.prepare("INSERT INTO customer_ledger(customer_id,delta,kind,method,shift_id,user_id,created_at) VALUES(?,?,?,?,?,?,?)")
-      .run(p.customerId, -p.amount, "payment", p.method, p.shiftId ?? null, p.userId, p.createdAt ?? Date.now());
+    const at = p.createdAt ?? Date.now();
+    const lid = Number(
+      db.prepare("INSERT INTO customer_ledger(customer_id,delta,kind,method,shift_id,user_id,created_at) VALUES(?,?,?,?,?,?,?)")
+        .run(p.customerId, -p.amount, "payment", p.method, p.shiftId ?? null, p.userId, at).lastInsertRowid,
+    );
+    postEntry(db, { account: p.method === "card" ? "bank" : "cash", delta: p.amount, kind: "customer_payment", refTable: "customer_ledger", refId: lid, shiftId: p.shiftId, inDrawer: p.method === "cash", userId: p.userId, createdAt: at });
     return c.balance - p.amount;
   })();
 }

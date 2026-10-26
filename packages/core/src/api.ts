@@ -55,7 +55,7 @@ export interface CheckoutResult { no: number; total: number; receiptHtml: string
 
 export interface ShiftSummary {
   openingCash: number; invoices: number; totalSales: number; cashSales: number; cardSales: number;
-  creditSales: number; cashReturns: number; cardReturns: number; debtPayments: number; expectedCash: number;
+  creditSales: number; cashReturns: number; cardReturns: number; debtPayments: number; payouts: number; expectedCash: number;
 }
 export interface CloseShiftResult { summary: ShiftSummary; counted: number; difference: number; reportHtml: string }
 
@@ -75,7 +75,7 @@ export interface ReturnInput {
 
 export interface Customer { id: number; name: string; phone: string; creditLimit: number; balance: number }
 export interface LedgerEntry { id: number; delta: number; kind: string; method: string | null; note: string | null; createdAt: number; balanceAfter: number }
-export interface Expense { id: number; category: string; amount: number; note: string; createdAt: number; userName: string }
+export interface Expense { id: number; category: string; amount: number; note: string; createdAt: number; userName: string; paidFrom: Account; fromDrawer: boolean }
 
 export interface InventoryProduct { id: number; name: string; barcode: string; price: number; cost: number; stock: number; minStock: number; byWeight: boolean }
 export interface SaveProductInput { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean }
@@ -96,6 +96,19 @@ export interface Analytics {
   expiring: ExpiringBatch[];
   debts: { total: number; top: { name: string; balance: number }[] };
   integrity: { ok: boolean; checked: number; brokenAt: number | null };
+  /** Money position right now (not period-based): treasury balances and what is owed to / by the shop. */
+  position: { cash: number; bank: number; total: number; receivables: number; payables: number };
+  treasuryCheck: { ok: boolean; mismatches: number };
+}
+
+export type Account = "cash" | "bank";
+export interface TreasuryEntry {
+  id: number; account: Account; delta: number; kind: string; refTable: string | null; refId: number | null; shiftId: number | null;
+  inDrawer: boolean; userName: string | null; approvedByName: string | null; note: string | null; createdAt: number; balanceAfter: number;
+}
+export interface TreasurySnapshot {
+  cash: number; bank: number; total: number; receivables: number; payables: number; net: number;
+  check: { ok: boolean; checked: number; mismatches: { kind: string; account: Account; expected: number; actual: number }[] };
 }
 
 export interface CloudStatus {
@@ -123,7 +136,7 @@ export interface Api {
   setUserActive(userId: number, active: boolean): Promise<void>;
   resetPin(userId: number, pin: string): Promise<void>;
 
-  openShift(openingCash: number): Promise<ShiftInfo>;
+  openShift(openingCash: number, approval?: Approval, reason?: string): Promise<ShiftInfo>;
   shiftReport(): Promise<{ shift: ShiftInfo; summary: ShiftSummary } | null>;
   listShifts(): Promise<ShiftHistoryRow[]>;
   closeShift(countedCash: number): Promise<CloseShiftResult>;
@@ -141,7 +154,7 @@ export interface Api {
   customerStatement(customerId: number): Promise<LedgerEntry[]>;
   receivePayment(customerId: number, amount: number, method: "cash" | "card"): Promise<number>;
 
-  addExpense(category: string, amount: number, note: string): Promise<void>;
+  addExpense(category: string, amount: number, note: string, paidFrom?: Account, fromDrawer?: boolean): Promise<void>;
   listExpenses(range: RangePreset): Promise<Expense[]>;
   deleteExpense(id: number): Promise<void>;
 
@@ -152,6 +165,12 @@ export interface Api {
   expiring(withinDays: number): Promise<ExpiringBatch[]>;
 
   analytics(range: RangePreset): Promise<Analytics>;
+  treasury(): Promise<TreasurySnapshot>;
+  treasuryEntries(f?: { account?: Account; kind?: string; range?: RangePreset | "all" }): Promise<TreasuryEntry[]>;
+  treasuryDeposit(account: Account, amount: number, note: string): Promise<void>;
+  treasuryWithdraw(account: Account, amount: number, note: string): Promise<void>;
+  treasuryTransfer(from: Account, to: Account, amount: number, note: string): Promise<void>;
+  treasuryCount(account: Account, counted: number, note: string): Promise<number>;
   backupNow(): Promise<string>;
   backupExport(): Promise<string | null>;
   restoreBackup(): Promise<boolean>;

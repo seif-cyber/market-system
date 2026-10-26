@@ -7,7 +7,7 @@ export const API_METHODS = [
   "listCustomers", "addCustomer", "setCreditLimit", "customerStatement", "receivePayment",
   "addExpense", "listExpenses", "deleteExpense",
   "listProducts", "saveProduct", "receiveStock", "adjustStock", "expiring",
-  "analytics", "backupNow", "backupExport", "restoreBackup",
+  "analytics", "treasury", "treasuryEntries", "treasuryDeposit", "treasuryWithdraw", "treasuryTransfer", "treasuryCount", "backupNow", "backupExport", "restoreBackup",
   "enterDemo", "exitDemo", "contactSupport", "remindCustomer",
   "cloudStatus", "cloudLink", "cloudUnlink", "cloudSyncNow",
 ] as const;

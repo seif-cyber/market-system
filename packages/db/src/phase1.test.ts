@@ -57,8 +57,9 @@ describe("shifts", () => {
     const r = closeShift(db, shift, 19000);
     expect(r.difference).toBe(-1000);
     expect(() => closeShift(db, shift, 1)).toThrow(/مقفولة/);
-    expect(() => openShift(db, owner, 0)).not.toThrow(); // can open a new one after closing
-    expect(() => openShift(db, owner, 0)).toThrow(/مفتوحة/);
+    expect(() => openShift(db, owner, 0)).toThrow(/اتسلّم/); // opening is locked to the counted 19000
+    expect(() => openShift(db, owner, 19000)).not.toThrow();
+    expect(() => openShift(db, owner, 19000)).toThrow(/مفتوحة/);
   });
 });
 
