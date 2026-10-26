@@ -128,6 +128,10 @@ export function verifyTreasury(db: Db): TreasuryCheck {
     ["expense", "bank", -one("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE paid_from='bank'")],
     ["expense_void", "cash", one("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE paid_from='cash' AND voided=1")],
     ["expense_void", "bank", one("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE paid_from='bank' AND voided=1")],
+    ["supplier_payment", "cash", -one("SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE account='cash'")],
+    ["supplier_payment", "bank", -one("SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE account='bank'")],
+    ["supplier_payment_void", "cash", one("SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE account='cash' AND voided=1")],
+    ["supplier_payment_void", "bank", one("SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE account='bank' AND voided=1")],
     ["shift_diff", "cash", one("SELECT COALESCE(SUM(counted_cash-expected_cash),0) v FROM shifts WHERE closed_at IS NOT NULL")],
   ];
   const mismatches: TreasuryCheck["mismatches"] = [];

@@ -7,3 +7,4 @@ export * from "./licenseStatus";
 export * from "./csv";
 export * from "./scale";
 export * from "./support";
+export * from "./promo";

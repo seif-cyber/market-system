@@ -97,6 +97,7 @@ export interface Analytics {
   debts: { total: number; top: { name: string; balance: number }[] };
   integrity: { ok: boolean; checked: number; brokenAt: number | null };
   /** Money position right now (not period-based): treasury balances and what is owed to / by the shop. */
+  categories: { name: string; qty: number; revenue: number; profit: number }[];
   position: { cash: number; bank: number; total: number; receivables: number; payables: number };
   treasuryCheck: { ok: boolean; mismatches: number };
 }

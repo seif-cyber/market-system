@@ -8,6 +8,7 @@ import { calcInvoice, chainHash, GENESIS_HASH, type LineInput } from "@market/co
 import type { Db, Role } from "./types";
 import { consumeBatches } from "./inventory";
 import { postSalePayment } from "./treasury";
+import { ensureCategory } from "./categories";
 export type { Db, Role } from "./types";
 export * from "./shifts";
 export * from "./customers";
@@ -16,6 +17,9 @@ export * from "./returns";
 export * from "./expenses";
 export * from "./analytics";
 export * from "./treasury";
+export * from "./categories";
+export * from "./purchases";
+export * from "./promotions";
 
 export function openDb(path: string, migrationsDir?: string): Db {
   const db = new Database(path);
@@ -97,7 +101,7 @@ export function findByBarcode(db: Db, code: string) {
 }
 
 // ---- sales ----
-export interface CartLine { productId: number; qty: number; discount?: number }
+export interface CartLine { productId: number; qty: number; discount?: number; promoId?: number | null; promoDiscount?: number }
 
 export interface SaleInput {
   userId: number;
@@ -114,11 +118,11 @@ export interface SaleInput {
 
 export function createSale(db: Db, input: SaleInput) {
   return db.transaction(() => {
-    const priced: (LineInput & { productId: number; name: string; cost: number })[] = input.lines.map((l) => {
+    const priced: (LineInput & { productId: number; name: string; cost: number; promoId: number | null; promoDiscount: number })[] = input.lines.map((l) => {
       const p = db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(l.productId) as any;
       if (!p) throw new Error(`unknown product ${l.productId}`);
       if (!(l.qty > 0)) throw new Error("الكمية لازم تكون أكبر من صفر");
-      return { productId: p.id, name: p.name, unitPrice: p.price, qty: l.qty, discount: l.discount, cost: p.cost };
+      return { productId: p.id, name: p.name, unitPrice: p.price, qty: l.qty, discount: l.discount, cost: p.cost, promoId: l.promoId ?? null, promoDiscount: l.promoDiscount ?? 0 };
     });
     const t = calcInvoice(priced, input);
     if (input.payMethod === "credit" && !input.customerId) throw new Error("اختار العميل للبيع الآجل");
@@ -136,8 +140,8 @@ export function createSale(db: Db, input: SaleInput) {
       ).run(no, input.userId, t.subtotal, t.discount, t.tax, t.total, input.payMethod, createdAt, prev, hash, input.shiftId ?? null, input.customerId ?? null, paid).lastInsertRowid,
     );
     for (const l of priced) {
-      db.prepare("INSERT INTO sale_items(sale_id,product_id,name,unit_price,qty,discount,cost) VALUES(?,?,?,?,?,?,?)")
-        .run(saleId, l.productId, l.name, l.unitPrice, l.qty, l.discount ?? 0, l.cost);
+      db.prepare("INSERT INTO sale_items(sale_id,product_id,name,unit_price,qty,discount,cost,promo_id,promo_discount) VALUES(?,?,?,?,?,?,?,?,?)")
+        .run(saleId, l.productId, l.name, l.unitPrice, l.qty, l.discount ?? 0, l.cost, l.promoId, l.promoDiscount);
       db.prepare("UPDATE products SET stock = stock - ? WHERE id=?").run(l.qty, l.productId);
       db.prepare("INSERT INTO stock_movements(product_id,delta,reason,ref_id,created_at) VALUES(?,?,?,?,?)")
         .run(l.productId, -l.qty, "sale", saleId, createdAt);
@@ -165,7 +169,7 @@ export function searchProducts(db: Db, q: string, limit = 20) {
 /** Upsert by barcode: existing barcode updates name/price/cost and adds to stock. */
 export function importProducts(
   db: Db,
-  rows: { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number }[],
+  rows: { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number; category?: string }[],
   now = Date.now(),
 ) {
   let created = 0, updated = 0;
@@ -182,6 +186,7 @@ export function importProducts(
         if (r.minStock) db.prepare("UPDATE products SET min_stock=? WHERE id=?").run(r.minStock, id);
         created++;
       }
+      if (r.category?.trim()) db.prepare("UPDATE products SET category_id=? WHERE id=?").run(ensureCategory(db, r.category), id);
       if (r.stock) db.prepare("INSERT INTO stock_movements(product_id,delta,reason,created_at) VALUES(?,?,?,?)").run(id, r.stock, "purchase", now);
       if (r.expiry && r.stock > 0) db.prepare("INSERT INTO batches(product_id,qty,expiry,created_at) VALUES(?,?,?,?)").run(id, r.stock, r.expiry, now);
     }

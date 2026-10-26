@@ -4,26 +4,28 @@ export type { ExpiringBatch } from "@market/core";
 
 export interface InventoryRow {
   id: number; name: string; barcode: string; price: number; cost: number;
-  stock: number; minStock: number; byWeight: boolean;
+  stock: number; minStock: number; byWeight: boolean; categoryId: number | null; category: string;
 }
 
-export function listProducts(db: Db, q = "", filter: "all" | "low" | "out" = "all", limit = 300): InventoryRow[] {
+export function listProducts(db: Db, q = "", filter: "all" | "low" | "out" = "all", limit = 300, categoryId?: number | null): InventoryRow[] {
   const where = filter === "low" ? "AND p.min_stock>0 AND p.stock<=p.min_stock" : filter === "out" ? "AND p.stock<=0" : "";
   const rows = db
     .prepare(
       `SELECT p.id, p.name, COALESCE((SELECT code FROM barcodes WHERE product_id=p.id ORDER BY rowid LIMIT 1),'') barcode,
-              p.price, p.cost, p.stock, p.min_stock minStock, p.by_weight byWeight
+              p.price, p.cost, p.stock, p.min_stock minStock, p.by_weight byWeight, p.category_id categoryId,
+              COALESCE((SELECT name FROM categories WHERE id=p.category_id),'') category
        FROM products p
-       WHERE p.active=1 ${where} AND (p.name LIKE ? OR EXISTS(SELECT 1 FROM barcodes b WHERE b.product_id=p.id AND b.code LIKE ?))
-       ORDER BY p.name LIMIT ?`,
+       WHERE p.active=1 ${where} AND (@cat IS NULL OR p.category_id=@cat)
+         AND (p.name LIKE @q OR EXISTS(SELECT 1 FROM barcodes b WHERE b.product_id=p.id AND b.code LIKE @q))
+       ORDER BY p.name LIMIT @limit`,
     )
-    .all(`%${q}%`, `%${q}%`, limit) as any[];
+    .all({ q: `%${q}%`, cat: categoryId ?? null, limit }) as any[];
   return rows.map((r) => ({ ...r, byWeight: !!r.byWeight }));
 }
 
 export function saveProduct(
   db: Db,
-  p: { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean },
+  p: { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean; categoryId?: number | null },
 ): number {
   if (!p.name.trim()) throw new Error("اكتب اسم الصنف");
   if (!(p.price > 0)) throw new Error("السعر لازم يكون أكبر من صفر");
@@ -32,9 +34,9 @@ export function saveProduct(
   return db.transaction(() => {
     let id = p.id;
     if (id) {
-      db.prepare("UPDATE products SET name=?, price=?, cost=?, min_stock=?, by_weight=? WHERE id=?").run(p.name.trim(), p.price, p.cost, p.minStock, p.byWeight ? 1 : 0, id);
+      db.prepare("UPDATE products SET name=?, price=?, cost=?, min_stock=?, by_weight=?, category_id=? WHERE id=?").run(p.name.trim(), p.price, p.cost, p.minStock, p.byWeight ? 1 : 0, p.categoryId ?? null, id);
     } else {
-      id = Number(db.prepare("INSERT INTO products(name,price,cost,min_stock,by_weight) VALUES(?,?,?,?,?)").run(p.name.trim(), p.price, p.cost, p.minStock, p.byWeight ? 1 : 0).lastInsertRowid);
+      id = Number(db.prepare("INSERT INTO products(name,price,cost,min_stock,by_weight,category_id) VALUES(?,?,?,?,?,?)").run(p.name.trim(), p.price, p.cost, p.minStock, p.byWeight ? 1 : 0, p.categoryId ?? null).lastInsertRowid);
     }
     if (code) {
       const owner = db.prepare("SELECT product_id FROM barcodes WHERE code=?").get(code) as { product_id: number } | undefined;
