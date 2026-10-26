@@ -28,3 +28,4 @@ button.inv{width:100%;display:grid;grid-template-columns:auto 1fr auto auto;gap:
 .menu button{text-align:right;border:0;background:none}.menu button:hover,.menu button.on{background:var(--bg)}
 .inv-list.flat{gap:0}.inv-list.flat>li.mv{border:0;border-bottom:1px solid var(--line);border-radius:0;display:flex;justify-content:space-between;gap:10px;padding:10px 4px}.inv-list.flat>li:last-child{border-bottom:0}.mv .amt{text-align:left;white-space:nowrap}
 .tabbar{flex-wrap:nowrap;gap:0}.tabbar button{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;padding:8px 4px;min-width:64px}.tabbar .ti{font-size:20px;line-height:1}
+.card textarea,.card select{width:100%;font:13px/1.4 Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;margin-block:6px}.muted{color:var(--mute);font-size:13px}

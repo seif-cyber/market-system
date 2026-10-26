@@ -9,7 +9,7 @@ import { Support } from "./Support";
 type Tab = "dash" | "treasury" | "suppliers" | "sales" | "shifts";
 const TABS: [Tab, string, string][] = [["dash", "📊", "التحليلات"], ["treasury", "🏦", "الخزنة"], ["suppliers", "🏭", "الموردين"], ["sales", "🧾", "الفواتير"], ["shifts", "🕒", "الورديات"]];
 
-export function Home({ be, user, shops, shopId, onPick, onAdd }: { be: Backend; user: CloudUser; shops: ShopRef[]; shopId: string; onPick: (id: string) => void; onAdd: () => void }) {
+export function Home({ be, user, shops, shopId, onPick, onAdd, isAdmin }: { be: Backend; user: CloudUser; shops: ShopRef[]; shopId: string; onPick: (id: string) => void; onAdd: () => void; isAdmin?: boolean }) {
   const [tab, setTab] = useState<Tab>("dash");
   const [range, setRange] = useState<RangePreset>("today");
   const [status, setStatus] = useState<ShopStatus | null | undefined>(undefined);
@@ -50,6 +50,7 @@ export function Home({ be, user, shops, shopId, onPick, onAdd }: { be: Backend; 
               {shops.length > 1 && shops.map((s, i) => <button key={s.id} role="menuitem" className={s.id === shopId ? "on" : ""} onClick={() => { onPick(s.id); setMenu(false); }}>محل {num(i + 1)}{s.id === shopId ? " ✔" : ""}</button>)}
               <button role="menuitem" onClick={() => { setMenu(false); onAdd(); }}>+ ربط محل جديد</button>
               <button role="menuitem" onClick={() => { setMenu(false); unlink(); }}>فك ربط المحل ده</button>
+              {isAdmin && <button role="menuitem" onClick={() => { setMenu(false); location.hash = "#/admin"; }}>إصدار أكواد التفعيل</button>}
               <button role="menuitem" onClick={() => be.logout()}>خروج</button>
             </div>
           )}
