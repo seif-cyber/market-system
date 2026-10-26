@@ -1,4 +1,4 @@
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
 import type { BrandSettings, ReportCol, ReportResult } from "@market/core";
 
 const TIME_KEYS = new Set(["at", "openedAt", "closedAt", "last"]);
@@ -36,7 +36,8 @@ td.money,td.qty,td.int,td.percent{text-align:left;white-space:nowrap}tr.tot td{f
 
 /** A real .xlsx (numbers stay numbers, RTL sheet). Money is converted from piastres to pounds. */
 export async function reportXlsx(r: ReportResult, brandName: string): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook();
+  const { default: Excel } = await import("exceljs");
+  const wb = new Excel.Workbook();
   const ws = wb.addWorksheet(r.title.slice(0, 31), { views: [{ rightToLeft: true, state: "frozen", ySplit: 3 }] });
   ws.addRow([brandName]).font = { bold: true, size: 14 };
   ws.addRow([`${r.title} — ${range(r)}`]);
