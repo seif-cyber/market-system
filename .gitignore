@@ -6,5 +6,5 @@ release/
 *.db-shm
 keys/private*.pem
 .env
-ui/
+/apps/desktop/ui/
 keys/
