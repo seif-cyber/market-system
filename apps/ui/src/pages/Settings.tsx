@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import type { Bootstrap, BrandSettings, CloudStatus, Role } from "@market/core";
 import { api, errMsg } from "../api";
 import { ago, dateTimeAr } from "../fmt";
@@ -106,30 +107,61 @@ function Backups({ owner, toast }: { owner: boolean; toast: T }) {
 
 function Cloud({ owner, toast }: { owner: boolean; toast: T }) {
   const [st, setSt] = useState<CloudStatus | null>(null);
-  const [email, setEmail] = useState(""); const [pw, setPw] = useState(""); const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [qr, setQr] = useState("");
+  const [left, setLeft] = useState(0);
   useEffect(() => { api.cloudStatus().then(setSt).catch(() => {}); }, []);
-  const run = (p: Promise<CloudStatus>, ok: string) => { setBusy(true); p.then((s) => { setSt(s); toast.ok(ok); }).catch((e) => { toast.fail(errMsg(e)); api.cloudStatus().then(setSt); }).finally(() => setBusy(false)); };
+
+  const code = st?.pending?.code, url = st?.pending?.url, until = st?.pending?.expiresAt;
+  useEffect(() => { if (url) QRCode.toString(url, { type: "svg", margin: 1, width: 180 }).then(setQr).catch(() => setQr("")); else setQr(""); }, [url]);
+  // While a code is on screen: count down, and poll to see whether the owner entered it on the phone.
+  useEffect(() => {
+    if (!code || !until) return;
+    const tick = () => setLeft(Math.max(0, Math.round((until - Date.now()) / 1000)));
+    tick();
+    const clock = setInterval(tick, 1000);
+    const poll = setInterval(() => api.cloudCheckLink().then((s) => { setSt(s); if (s.linked) toast.ok(`تم ربط المحل بحساب ${s.email} ✔`); }).catch(() => {}), 3000);
+    return () => { clearInterval(clock); clearInterval(poll); };
+  }, [code, until]); // eslint-disable-line
+  useEffect(() => { if (code && left === 0 && until && until < Date.now()) api.cloudStatus().then(setSt); }, [left]); // eslint-disable-line
+
+  const run = (p: Promise<CloudStatus>, ok?: string) => { setBusy(true); p.then((s) => { setSt(s); if (ok) toast.ok(ok); }).catch((e) => { toast.fail(errMsg(e)); api.cloudStatus().then(setSt); }).finally(() => setBusy(false)); };
   if (!st) return null;
+  const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return (
     <div className="card wide">
-      <h2>متابعة المبيعات من الموبايل</h2>
+      <h2>متابعة المبيعات من موبايل المالك</h2>
       {!st.configured ? <p className="muted">الخدمة دي مش مفعّلة في النسخة دي.</p> : st.linked ? (
         <>
-          <p>مربوط بحساب: <b>{st.email}</b></p>
+          <p>المحل مربوط بحساب المالك: <b dir="ltr">{st.email}</b></p>
           <p>{st.lastSync ? <>آخر مزامنة: {dateTimeAr(st.lastSync)} ({ago(st.lastSync)})</> : "لسه ما اتبعتش بيانات"}</p>
           {st.lastError && <div className="error">آخر خطأ: {st.lastError}</div>}
           <div className="row"><button className="primary" disabled={busy} onClick={() => run(api.cloudSyncNow(), "اتبعتت البيانات")}>مزامنة الآن</button>
-            {owner && <button disabled={busy} onClick={() => confirm("فك الربط؟") && run(api.cloudUnlink(), "اتفك الربط")}>فك الربط</button>}</div>
+            {owner && <button disabled={busy} onClick={() => confirm("فك الربط؟ المالك مش هيشوف المحل على الموبايل لحد ما تربطوه تاني.") && run(api.cloudUnlink(), "اتفك الربط")}>فك الربط</button>}</div>
           <p className="muted">البيانات بتتبعت لوحدها كل 15 دقيقة لما يكون فيه إنترنت. لو النت قطع البرنامج بيكمل شغل عادي.</p>
         </>
-      ) : owner ? (
+      ) : !owner ? <p className="muted">المالك بس هو اللي يقدر يربط المحل بحسابه.</p> : code ? (
+        <div className="pairing">
+          <div>
+            <p>على موبايل المالك:</p>
+            <ol>
+              <li>افتح الموقع: <b dir="ltr">{url!.split("/?")[0]}</b></li>
+              <li>سجّل دخول (بجوجل أو بإيميل).</li>
+              <li>اكتب كود الربط ده، أو امسح الـ QR.</li>
+            </ol>
+            <div className="code" dir="ltr" aria-label="كود الربط">{code.slice(0, 5)}-{code.slice(5)}</div>
+            <p className="muted">الكود صالح لمدة <b>{mm}</b> دقيقة، وبيتغلق لوحده أول ما المالك يربط.</p>
+          </div>
+          {qr && <div className="qr" dangerouslySetInnerHTML={{ __html: qr }} />}
+          <div className="row"><button disabled={busy} onClick={() => run(api.cloudStartLink())}>كود جديد</button></div>
+        </div>
+      ) : (
         <>
-          <p>سجّل بنفس الإيميل والباسورد اللي بتدخل بيهم على موقع المتابعة. الباسورد مش بيتخزّن في البرنامج.</p>
-          <div className="row"><label className="grow">الإيميل<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-            <label className="grow">الباسورد<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /></label></div>
-          <button className="primary" disabled={busy || !email || !pw} onClick={() => run(api.cloudLink(email, pw), "تم الربط ✔")}>ربط الحساب</button>
+          <p>اربط محلك بحساب المالك عشان يتابع المبيعات والأرباح من موبايله. المالك هو اللي هيسجّل دخول بنفسه على الموقع (مفيش باسورد بيتكتب هنا).</p>
+          {st.lastError && <div className="error">{st.lastError}</div>}
+          <button className="primary" disabled={busy} onClick={() => run(api.cloudStartLink())}>ربط حساب المالك بالموبايل</button>
         </>
-      ) : <p className="muted">المالك بس يقدر يربط الحساب.</p>}
+      )}
     </div>
   );
 }

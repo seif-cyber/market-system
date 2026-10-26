@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Backend, CloudUser } from "./backend";
+import type { Backend, CloudUser, ShopRef } from "./backend";
 import { createFirebaseBackend } from "./firebaseBackend";
 import { createMockBackend } from "./mockBackend";
 import { Login } from "./Login";
 import { Home } from "./Home";
+import { LinkShop, takePendingCode } from "./LinkShop";
 
 async function loadBackend(): Promise<Backend | null> {
   if (import.meta.env.MODE === "mock") return createMockBackend();
@@ -14,17 +15,27 @@ async function loadBackend(): Promise<Backend | null> {
   } catch { return null; }
 }
 
+const Spinner = () => <div className="center"><div className="spinner" aria-label="جاري التحميل" /></div>;
+
 export function App() {
   const [be, setBe] = useState<Backend | null | undefined>(undefined);
   const [user, setUser] = useState<CloudUser | null | undefined>(undefined);
+  const [shops, setShops] = useState<ShopRef[] | undefined>(undefined);
+  const [adding, setAdding] = useState(false);
+  const [active, setActive] = useState<string>(() => { try { return localStorage.getItem("active-shop") ?? ""; } catch { return ""; } });
 
-  useEffect(() => { loadBackend().then(setBe); }, []);
+  useEffect(() => { takePendingCode(); loadBackend().then(setBe); }, []);
   useEffect(() => (be ? be.onAuth(setUser) : undefined), [be]);
+  useEffect(() => { setShops(undefined); return be && user ? be.watchShops(user.uid, setShops) : undefined; }, [be, user]);
+  const pick = (id: string) => { setActive(id); setAdding(false); try { localStorage.setItem("active-shop", id); } catch { /* private mode */ } };
 
-  if (be === undefined || (be && user === undefined)) return <div className="center"><div className="spinner" aria-label="جاري التحميل" /></div>;
+  if (be === undefined || (be && user === undefined)) return <Spinner />;
   if (be === null) return (
-    <div className="center"><div className="card"><h2>الموقع لسه متظبطش</h2><p>ملف <code>firebase-config.json</code> فاضي. املاه ببيانات مشروع Firebase وارفع الموقع تاني.</p></div></div>
+    <div className="center"><div className="card"><h2>الموقع لسه متظبطش</h2><p>ملف <code>firebase-config.json</code> ناقص <code>apiKey</code>. املاه ببيانات مشروع Firebase وارفع الموقع تاني.</p></div></div>
   );
   if (!user) return <Login be={be} />;
-  return <Home be={be} user={user} />;
+  if (shops === undefined) return <Spinner />;
+  if (shops.length === 0 || adding) return <LinkShop be={be} user={user} first={shops.length === 0} onLinked={pick} onCancel={shops.length ? () => setAdding(false) : undefined} />;
+  const shopId = shops.some((s) => s.id === active) ? active : shops[0].id;
+  return <Home be={be} user={user} shops={shops} shopId={shopId} onPick={pick} onAdd={() => setAdding(true)} />;
 }

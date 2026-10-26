@@ -100,6 +100,12 @@ export function DashboardView({ a, range, onRange, syncedAt }: { a: Analytics; r
         </Card>
       </div>
 
+      {a.categories && a.categories.length > 0 && (
+        <Card title="المبيعات حسب القسم">
+          <ul className="list">{a.categories.map((c) => { const max = Math.max(1, ...a.categories.map((x) => x.revenue)); return <li key={c.name}>{c.name}<span className="bar-inline"><i style={{ width: `${(c.revenue / max) * 100}%` }} /></span><b>{egp0(c.revenue)}</b></li>; })}</ul>
+        </Card>
+      )}
+
       <div className="grid3">
         <Card title={`⚠ مخزون قارب على النفاد (${num(a.lowStock.length)})`}>
           <ul className="list">{a.lowStock.map((p) => <li key={p.id}>{p.name}<b className={p.stock <= 0 ? "down" : ""}>{num(p.stock)} / {num(p.minStock)}</b></li>)}{!a.lowStock.length && <li className="muted">المخزون تمام</li>}</ul>

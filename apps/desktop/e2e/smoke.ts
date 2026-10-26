@@ -149,7 +149,7 @@ await page.click(".modal button.primary");
 await page.waitForSelector("text=اتسجّل الإيداع");
 await page.waitForSelector("text=الخزنة مطابقة لسجلات");
 await tab("الإعدادات");
-await page.waitForSelector("text=متابعة المبيعات من الموبايل"); await shot("settings");
+await page.waitForSelector("text=متابعة المبيعات من موبايل المالك"); await shot("settings");
 
 // support: two engineers
 await page.click("header >> text=الدعم");

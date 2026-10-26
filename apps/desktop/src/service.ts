@@ -26,7 +26,8 @@ const MAX_FAILS = 5, LOCK_MS = 60_000, KEEP_BACKUPS = 30;
 
 export interface Cloud {
   status(): CloudStatus;
-  link(email: string, password: string): Promise<CloudStatus>;
+  startLink(): Promise<CloudStatus>;
+  checkLink(): Promise<CloudStatus>;
   unlink(): Promise<CloudStatus>;
   syncNow(): Promise<CloudStatus>;
 }
@@ -678,13 +679,22 @@ export function createService(deps: Deps): Service {
 
     async cloudStatus() {
       need("manager");
-      return deps.cloud?.status() ?? { configured: false, linked: false, email: "", lastSync: 0, lastError: "" };
+      return deps.cloud?.status() ?? { configured: false, linked: false, email: "", lastSync: 0, lastError: "", pending: null };
     },
-    async cloudLink(email, password) {
+    // Only the shop's owner can start the pairing; the owner then signs in on the website and enters the code.
+    async cloudStartLink() {
       const u = need("owner");
       if (!deps.cloud) throw new Error("الخدمة السحابية مش متاحة في النسخة دي");
-      const s = await deps.cloud.link(email, password);
-      audit(db, u.id, "cloud_linked", { email });
+      const s = await deps.cloud.startLink();
+      audit(db, u.id, "cloud_link_started");
+      return s;
+    },
+    async cloudCheckLink() {
+      need("owner");
+      if (!deps.cloud) throw new Error("الخدمة السحابية مش متاحة في النسخة دي");
+      const before = deps.cloud.status().linked;
+      const s = await deps.cloud.checkLink();
+      if (!before && s.linked) audit(db, null, "cloud_linked", { email: s.email });
       return s;
     },
     async cloudUnlink() {

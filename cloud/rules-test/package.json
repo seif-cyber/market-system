@@ -1,0 +1,5 @@
+{
+  "name": "market-rules-test", "private": true, "type": "module",
+  "scripts": { "test": "firebase emulators:exec --config ../firebase.emulator.json --only firestore --project demo-market \"node --test\"" },
+  "devDependencies": { "@firebase/rules-unit-testing": "3.0.4", "firebase": "10.14.1", "firebase-tools": "13.29.1" }
+}

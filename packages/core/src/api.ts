@@ -156,12 +156,14 @@ export interface TreasurySnapshot {
   check: { ok: boolean; checked: number; mismatches: { kind: string; account: Account; expected: number; actual: number }[] };
 }
 
+export interface CloudPairing { code: string; expiresAt: number; url: string }
 export interface CloudStatus {
   configured: boolean; // Firebase project settings were built into this app
-  linked: boolean;
-  email: string;
-  lastSync: number; // epoch ms, 0 = never
+  linked: boolean;     // an owner account has claimed this shop
+  email: string;       // the owner's account
+  lastSync: number;    // epoch ms, 0 = never
   lastError: string;
+  pending: CloudPairing | null; // a pairing code is waiting for the owner to enter it
 }
 
 /** Everything the UI can ask the main process to do. */
@@ -252,7 +254,8 @@ export interface Api {
   remindCustomer(customerId: number): Promise<void>;
 
   cloudStatus(): Promise<CloudStatus>;
-  cloudLink(email: string, password: string): Promise<CloudStatus>;
+  cloudStartLink(): Promise<CloudStatus>;
+  cloudCheckLink(): Promise<CloudStatus>;
   cloudUnlink(): Promise<CloudStatus>;
   cloudSyncNow(): Promise<CloudStatus>;
 }

@@ -27,3 +27,8 @@ export function fmtCell(col: { key: string; type: string }, v: string | number |
   if (col.type === "date") return TIME_KEYS.has(col.key) ? dateTimeAr(n) : dateLongAr(n);
   return num(n);
 }
+
+export const KIND_AR: Record<string, string> = {
+  sale: "بيع", sale_return: "مرتجع", customer_payment: "سداد عميل", expense: "مصروف", expense_void: "إلغاء مصروف", deposit: "إيداع", withdrawal: "سحب",
+  transfer: "تحويل", count_adjust: "جرد", shift_diff: "فرق وردية", handover_adjust: "تعديل استلام الدرج", supplier_payment: "دفع مورد", supplier_payment_void: "إلغاء دفعة مورد",
+};
