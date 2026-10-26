@@ -4,6 +4,9 @@ on:
   push:
     branches: [claude/kind-cannon-wcxb6i, main]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -26,6 +29,13 @@ jobs:
         with:
           name: MarketPOS-Setup
           path: release/*.exe
+      - name: Publish installer to the 'latest' release (stable download link)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "أحدث نسخة" --notes "آخر نسخة من برنامج الكاشير (تتحدث تلقائي مع كل تعديل على main)"
+          gh release upload latest release/*.exe --clobber
       - uses: actions/upload-artifact@v4
         with:
           name: cloud-site
