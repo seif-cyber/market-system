@@ -25,15 +25,26 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export interface ImportedProduct { barcode: string; name: string; price: number; cost: number; stock: number }
+export interface ImportedProduct { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number }
 
-const HEAD: Record<string, keyof ImportedProduct> = {
+const HEAD: Record<string, "barcode" | "name" | "price" | "cost" | "stock" | "min_stock" | "expiry"> = {
   barcode: "barcode", "الباركود": "barcode", "باركود": "barcode",
   name: "name", "الاسم": "name", "اسم الصنف": "name",
   price: "price", "السعر": "price", "سعر البيع": "price",
   cost: "cost", "التكلفة": "cost", "سعر الشراء": "cost",
   stock: "stock", "الكمية": "stock", "المخزون": "stock",
+  min_stock: "min_stock", "الحد الأدنى": "min_stock",
+  expiry: "expiry", "تاريخ الصلاحية": "expiry", "الصلاحية": "expiry",
 };
+
+/** Accepts 2026-12-31 or 31/12/2026; returns epoch ms (end of that day) or undefined. */
+export function parseDate(s: string): number | undefined {
+  const m = s.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) ?? s.trim().match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (!m) return undefined;
+  const [y, mo, d] = m[1].length === 4 ? [+m[1], +m[2], +m[3]] : [+m[3], +m[2], +m[1]];
+  const t = new Date(y, mo - 1, d, 23, 59, 59).getTime();
+  return Number.isNaN(t) ? undefined : t;
+}
 
 const toPiastres = (s: string) => Math.round(parseFloat(s.replace(/[^\d.\-]/g, "") || "0") * 100);
 
@@ -52,7 +63,12 @@ export function parseProductsCsv(text: string): { products: ImportedProduct[]; e
     cols.forEach((k, j) => k && (o[k] = (r[j] ?? "").trim()));
     const price = toPiastres(o.price ?? "");
     if (!o.barcode || !o.name || !(price > 0)) return void errors.push(`سطر ${i + 2}: بيانات ناقصة أو سعر غلط`);
-    products.push({ barcode: o.barcode, name: o.name, price, cost: toPiastres(o.cost ?? ""), stock: parseFloat(o.stock || "0") || 0 });
+    const expiry = o.expiry ? parseDate(o.expiry) : undefined;
+    if (o.expiry && !expiry) return void errors.push(`سطر ${i + 2}: تاريخ الصلاحية غلط`);
+    products.push({
+      barcode: o.barcode, name: o.name, price, cost: toPiastres(o.cost ?? ""), stock: parseFloat(o.stock || "0") || 0,
+      ...(o.min_stock ? { minStock: parseFloat(o.min_stock) || 0 } : {}), ...(expiry ? { expiry } : {}),
+    });
   });
   return { products, errors };
 }

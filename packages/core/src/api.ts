@@ -2,7 +2,8 @@ import type { LicenseState } from "./licenseStatus";
 
 export type Role = "owner" | "manager" | "cashier";
 export interface SessionUser { id: number; name: string; role: Role }
-export interface ProductHit { id: number; name: string; price: number; stock: number }
+export interface ProductHit { id: number; name: string; price: number; stock: number; qty?: number; byWeight?: boolean }
+export type RangePreset = "today" | "7d" | "30d" | "month";
 
 export interface BrandSettings {
   brand_name: string;
@@ -13,7 +14,13 @@ export interface BrandSettings {
   footer: string;
   tax_rate: string; // percent, e.g. "14"
   tax_inclusive: string; // "1" | "0"
+  scale_prefix: string; // shop-scale barcode prefix, e.g. "20"
+  scale_mode: string; // "weight" | "price"
+  scale_plu_len: string;
+  expiry_alert_days: string;
 }
+
+export interface ShiftInfo { id: number; openedAt: number; openingCash: number }
 
 export interface Bootstrap {
   users: { id: number; name: string; role: Role }[];
@@ -22,15 +29,74 @@ export interface Bootstrap {
   deviceCode: string;
   brand: BrandSettings;
   user: SessionUser | null;
+  shift: ShiftInfo | null;
+  demo: boolean;
 }
+
+export interface Approval { userId: number; pin: string }
 
 export interface CheckoutInput {
   lines: { productId: number; qty: number; discount?: number }[];
-  payMethod: "cash" | "card" | "mixed";
+  payMethod: "cash" | "card" | "credit";
   invoiceDiscount?: number;
+  customerId?: number;
+  paidNow?: number;
+  approval?: Approval;
+}
+export interface CheckoutResult { no: number; total: number; receiptHtml: string }
+
+export interface ShiftSummary {
+  openingCash: number; invoices: number; totalSales: number; cashSales: number; cardSales: number;
+  creditSales: number; cashReturns: number; cardReturns: number; debtPayments: number; expectedCash: number;
+}
+export interface CloseShiftResult { summary: ShiftSummary; counted: number; difference: number; reportHtml: string }
+
+export interface HeldCart { id: number; label: string; createdAt: number; data: string }
+
+export interface SaleForReturn {
+  id: number; no: number; createdAt: number; total: number; payMethod: string; customerName: string | null;
+  items: { id: number; name: string; unitPrice: number; qty: number; discount: number; returned: number }[];
+}
+export interface ReturnInput {
+  saleNo: number;
+  lines: { saleItemId: number; qty: number }[];
+  refundMethod?: "cash" | "card";
+  reason?: string;
+  approval?: Approval;
 }
 
-export interface CheckoutResult { no: number; total: number; receiptHtml: string }
+export interface Customer { id: number; name: string; phone: string; creditLimit: number; balance: number }
+export interface LedgerEntry { id: number; delta: number; kind: string; method: string | null; note: string | null; createdAt: number; balanceAfter: number }
+export interface Expense { id: number; category: string; amount: number; note: string; createdAt: number; userName: string }
+
+export interface InventoryProduct { id: number; name: string; barcode: string; price: number; cost: number; stock: number; minStock: number; byWeight: boolean }
+export interface SaveProductInput { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean }
+export interface ReceiveStockInput { productId: number; qty: number; cost?: number; expiry?: number }
+export interface ExpiringBatch { productId: number; name: string; qty: number; expiry: number; daysLeft: number }
+
+export interface Analytics {
+  range: { from: number; to: number };
+  kpi: { sales: number; invoices: number; avgBasket: number; returns: number; netSales: number; grossProfit: number; expenses: number; netProfit: number; prevNetSales: number };
+  daily: { day: string; sales: number }[];
+  hourly: { hour: number; sales: number; invoices: number }[];
+  topProducts: { name: string; qty: number; revenue: number; profit: number }[];
+  deadStock: { name: string; stock: number; value: number }[];
+  cashiers: { name: string; invoices: number; sales: number; returns: number; discounts: number; cashDiff: number }[];
+  payments: { method: string; total: number }[];
+  expensesByCategory: { category: string; total: number }[];
+  lowStock: { id: number; name: string; stock: number; minStock: number }[];
+  expiring: ExpiringBatch[];
+  debts: { total: number; top: { name: string; balance: number }[] };
+  integrity: { ok: boolean; checked: number; brokenAt: number | null };
+}
+
+export interface CloudStatus {
+  configured: boolean; // Firebase project settings were built into this app
+  linked: boolean;
+  email: string;
+  lastSync: number; // epoch ms, 0 = never
+  lastError: string;
+}
 
 /** Everything the UI can ask the main process to do. */
 export interface Api {
@@ -44,7 +110,48 @@ export interface Api {
   search(q: string): Promise<ProductHit[]>;
   checkout(i: CheckoutInput): Promise<CheckoutResult>;
   importCsv(text: string): Promise<{ created: number; updated: number; errors: string[] }>;
-  todaySummary(): Promise<{ count: number; total: number; cash: number; card: number }>;
-  addUser(name: string, role: Role, pin: string): Promise<void>;
   print(html: string): Promise<void>;
+  addUser(name: string, role: Role, pin: string): Promise<void>;
+  setUserActive(userId: number, active: boolean): Promise<void>;
+  resetPin(userId: number, pin: string): Promise<void>;
+
+  openShift(openingCash: number): Promise<ShiftInfo>;
+  closeShift(countedCash: number): Promise<CloseShiftResult>;
+  holdCart(label: string, data: string): Promise<void>;
+  listHeld(): Promise<HeldCart[]>;
+  resumeHeld(id: number): Promise<string>;
+  deleteHeld(id: number): Promise<void>;
+
+  findSale(no: number): Promise<SaleForReturn | null>;
+  createReturn(i: ReturnInput): Promise<{ total: number; method: string }>;
+
+  listCustomers(q?: string): Promise<Customer[]>;
+  addCustomer(name: string, phone: string, creditLimit: number): Promise<number>;
+  setCreditLimit(customerId: number, limit: number): Promise<void>;
+  customerStatement(customerId: number): Promise<LedgerEntry[]>;
+  receivePayment(customerId: number, amount: number, method: "cash" | "card"): Promise<number>;
+
+  addExpense(category: string, amount: number, note: string): Promise<void>;
+  listExpenses(range: RangePreset): Promise<Expense[]>;
+  deleteExpense(id: number): Promise<void>;
+
+  listProducts(q: string, filter: "all" | "low" | "out"): Promise<InventoryProduct[]>;
+  saveProduct(p: SaveProductInput): Promise<number>;
+  receiveStock(i: ReceiveStockInput): Promise<void>;
+  adjustStock(productId: number, actual: number): Promise<number>;
+  expiring(withinDays: number): Promise<ExpiringBatch[]>;
+
+  analytics(range: RangePreset): Promise<Analytics>;
+  backupNow(): Promise<string>;
+  backupExport(): Promise<string | null>;
+  restoreBackup(): Promise<boolean>;
+
+  enterDemo(): Promise<void>;
+  exitDemo(): Promise<void>;
+  contactSupport(message?: string): Promise<void>;
+
+  cloudStatus(): Promise<CloudStatus>;
+  cloudLink(email: string, password: string): Promise<CloudStatus>;
+  cloudUnlink(): Promise<CloudStatus>;
+  cloudSyncNow(): Promise<CloudStatus>;
 }

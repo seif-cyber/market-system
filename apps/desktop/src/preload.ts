@@ -1,11 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
-
-const methods = [
-  "bootstrap", "setupOwner", "login", "logout", "saveSettings", "activate", "scan", "search",
-  "checkout", "importCsv", "todaySummary", "addUser", "print",
-] as const;
+import { API_METHODS } from "../../../packages/core/src/apiMethods";
 
 contextBridge.exposeInMainWorld(
   "api",
-  Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => ipcRenderer.invoke(`api:${m}`, ...a)])),
+  Object.fromEntries(API_METHODS.map((m) => [m, (...a: unknown[]) => ipcRenderer.invoke(`api:${m}`, ...a)])),
 );
