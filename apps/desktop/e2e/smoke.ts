@@ -26,6 +26,7 @@ await page.addInitScript((methods: string[]) => {
   (window as any).api = Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => (window as any)[`__${m}`](...a)]));
 }, [...API_METHODS]);
 const errors: string[] = [];
+page.on("dialog", (d: any) => d.accept());
 page.on("pageerror", (e: Error) => errors.push(e.message));
 page.on("console", (m: any) => m.type() === "error" && errors.push(m.text()));
 
@@ -88,12 +89,57 @@ await page.click("button >> text=استرجاع");
 await page.waitForSelector("td:has-text('أرز مصري')");
 await page.click("button >> text=إلغاء الفاتورة");
 
+// offers are previewed in the cart: buy 2 get 1 free on Pepsi (demo promo), computed by the server
+await page.fill(".scan", "6221011"); await page.press(".scan", "Enter");
+await page.fill(".scan", "6221011"); await page.press(".scan", "Enter");
+await page.fill(".scan", "6221011"); await page.press(".scan", "Enter");
+await page.waitForSelector("text=خصم عروض");
+await shot("pos-offers");
+await page.click("button >> text=إلغاء الفاتورة");
+
 // other pages
 await tab("المخزون"); await page.waitForSelector("td >> text=شاي العروسة"); await shot("inventory");
 await page.click(".tabs >> text=الصلاحية"); await page.waitForSelector("td:has-text('منتهي')"); await shot("expiry");
-await tab("العملاء"); await page.waitForSelector("tr.click"); await shot("customers");
-await page.click("tr.click >> nth=0"); await page.waitForSelector("text=كشف حساب"); await shot("statement");
+await tab("العملاء والموردين"); await page.waitForSelector("tr.click"); await shot("parties");
+await page.click(".tabs >> text=الموردين"); await page.waitForSelector("td:has-text('مصنع الأمل للألبان')");
+await page.click("tr.click >> nth=0"); await page.waitForSelector("text=كشف المورد"); await shot("supplier-statement");
+await page.click(".tabs >> text=فواتير الشراء"); await page.waitForSelector("span.st"); await shot("supplier-invoices");
 await page.keyboard.press("Escape");
+await page.click(".tabs >> text=العملاء"); await page.click("tr.click >> nth=0"); await page.waitForSelector("text=كشف العميل"); await shot("statement");
+await page.keyboard.press("Escape");
+
+// purchases: a new invoice, part-paid from the bank
+await tab("المشتريات"); await page.waitForSelector("text=علينا للموردين"); await shot("purchases");
+await page.click("button >> text=+ فاتورة شراء جديدة");
+await page.selectOption(".modal select >> nth=0", { index: 1 });
+await page.fill("input[placeholder*='امسح الباركود']", "6221001");
+await page.click(".pick button >> nth=0");
+await page.fill(".modal table input[type=number] >> nth=0", "50");
+await page.fill(".modal table input[type=number] >> nth=1", "9");
+await page.fill("label:has-text('المدفوع دلوقتي') input", "100");
+await page.selectOption("label:has-text('من فين') select", "bank");
+await shot("purchase-form");
+await page.click("button >> text=حفظ الفاتورة وإضافة للمخزون");
+await page.waitForSelector("text=اتسجّلت فاتورة الشراء");
+await tab("الخزنة"); await page.waitForSelector("text=الخزنة مطابقة لسجلات");
+await tab("المخزون"); await page.click(".tabs >> text=الأقسام"); await page.waitForSelector("td:has-text('مشروبات')"); await shot("categories");
+await page.click(".tabs >> text=الأصناف"); await page.waitForSelector("select >> nth=0 >> option:has-text('مشروبات')", { state: "attached" });
+await page.selectOption("select >> nth=0", await page.$eval("select >> nth=0 >> option:has-text('مشروبات')", (o: any) => o.value));
+await page.waitForSelector("td:has-text('بيبسي')");
+// import a CSV and undo it
+await page.click(".tabs >> text=استيراد من Excel");
+await page.setInputFiles("input[type=file]", { name: "new.csv", mimeType: "text/csv", buffer: Buffer.from("الباركود,الاسم,السعر,الكمية,القسم\n7771,صنف مستورد,12,5,منظفات\n6221001,شاي العروسة 40 جم,13,10,مشروبات\n") });
+await page.waitForSelector("button >> text=تراجع عن الاستيراد ده");
+await shot("import");
+await page.click("button >> text=تراجع عن الاستيراد ده");
+await page.waitForSelector("text=تم التراجع");
+await shot("import-undone");
+await tab("العروض"); await page.waitForSelector("td:has-text('اشترِ 2 بيبسي')"); await shot("offers");
+await tab("التقارير"); await page.waitForSelector("text=حدد التقرير للعرض أو الطباعة");
+await page.click(".rep-item >> text=المبيعات حسب الصنف"); await page.waitForSelector("tr.sum"); await shot("reports");
+await page.click(".rep-item >> text=حركة الخزنة"); await page.waitForSelector("td:has-text('بيع')");
+await page.click("button >> text=Excel");
+await tab("المخزون");
 await tab("المصاريف"); await page.waitForSelector("td:has-text('إيجار')"); await shot("expenses");
 await tab("الخزنة");
 await page.waitForSelector("text=الإجمالي المتاح"); await page.waitForSelector("text=الخزنة مطابقة لسجلات"); await shot("treasury");

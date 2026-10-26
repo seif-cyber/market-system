@@ -136,14 +136,14 @@ export interface PurchaseRow {
   total: number; paid: number; remaining: number; voided: boolean; note: string; status: "paid" | "partial" | "unpaid" | "overdue" | "voided";
 }
 
-export function listPurchases(db: Db, f: { supplierId?: number; from?: number; to?: number; limit?: number } = {}, now = Date.now()): PurchaseRow[] {
+export function listPurchases(db: Db, f: { id?: number; supplierId?: number; from?: number; to?: number; limit?: number } = {}, now = Date.now()): PurchaseRow[] {
   const rows = db.prepare(
     `SELECT p.id, p.supplier_id supplierId, c.name supplier, p.supplier_ref supplierRef, p.invoice_date invoiceDate, p.due_date dueDate, p.total, p.voided, p.note,
             COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.purchase_id=p.id AND sp.voided=0),0) paid
      FROM purchase_invoices p JOIN customers c ON c.id=p.supplier_id
-     WHERE (@s IS NULL OR p.supplier_id=@s) AND p.invoice_date BETWEEN @from AND @to
+     WHERE (@id IS NULL OR p.id=@id) AND (@s IS NULL OR p.supplier_id=@s) AND p.invoice_date BETWEEN @from AND @to
      ORDER BY p.invoice_date DESC, p.id DESC LIMIT @limit`,
-  ).all({ s: f.supplierId ?? null, from: f.from ?? 0, to: f.to ?? 8.64e15, limit: f.limit ?? 200 }) as any[];
+  ).all({ id: f.id ?? null, s: f.supplierId ?? null, from: f.from ?? 0, to: f.to ?? 8.64e15, limit: f.limit ?? 200 }) as any[];
   return rows.map((r) => {
     const remaining = r.voided ? 0 : r.total - r.paid;
     const status = r.voided ? "voided" : remaining === 0 ? "paid" : r.dueDate && r.dueDate < now ? "overdue" : r.paid > 0 ? "partial" : "unpaid";

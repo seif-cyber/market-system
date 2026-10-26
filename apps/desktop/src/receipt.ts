@@ -8,7 +8,7 @@ export interface ReceiptData {
   no: number;
   cashier: string;
   createdAt: number;
-  items: { name: string; qty: number; unitPrice: number; discount: number }[];
+  items: { name: string; qty: number; unitPrice: number; discount: number; promo?: number }[];
   subtotal: number; discount: number; tax: number; total: number;
   payMethod: string;
   customerName?: string;
@@ -21,7 +21,7 @@ const PAY: Record<string, string> = { cash: "نقدي", card: "فيزا", mixed:
 export function buildReceiptHtml(r: ReceiptData): string {
   const b = r.brand;
   const rows = r.items
-    .map((i) => `<tr><td>${esc(i.name)}<br><small>${i.qty} × ${egp(i.unitPrice)}${i.discount ? ` − ${egp(i.discount)}` : ""}</small></td><td class="n">${egp(Math.round(i.unitPrice * i.qty) - i.discount)}</td></tr>`)
+    .map((i) => `<tr><td>${esc(i.name)}<br><small>${i.qty} × ${egp(i.unitPrice)}${i.discount ? ` − ${egp(i.discount)}${i.promo ? " (عرض)" : ""}` : ""}</small></td><td class="n">${egp(Math.round(i.unitPrice * i.qty) - i.discount)}</td></tr>`)
     .join("");
   const line = (l: string, v: number, cls = "") => `<tr class="${cls}"><td>${l}</td><td class="n">${egp(v)}</td></tr>`;
   return `<!doctype html><html dir="rtl" lang="ar"><meta charset="utf-8"><style>

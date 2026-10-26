@@ -9,6 +9,7 @@ import type { Db, Role } from "./types";
 import { consumeBatches } from "./inventory";
 import { postSalePayment } from "./treasury";
 import { ensureCategory } from "./categories";
+import { recordImportItem } from "./imports";
 export type { Db, Role } from "./types";
 export * from "./shifts";
 export * from "./customers";
@@ -20,6 +21,8 @@ export * from "./treasury";
 export * from "./categories";
 export * from "./purchases";
 export * from "./promotions";
+export * from "./reports";
+export * from "./imports";
 
 export function openDb(path: string, migrationsDir?: string): Db {
   const db = new Database(path);
@@ -171,6 +174,7 @@ export function importProducts(
   db: Db,
   rows: { barcode: string; name: string; price: number; cost: number; stock: number; minStock?: number; expiry?: number; category?: string }[],
   now = Date.now(),
+  batchId?: number,
 ) {
   let created = 0, updated = 0;
   db.transaction(() => {
@@ -179,16 +183,18 @@ export function importProducts(
       let id: number;
       if (hit) {
         id = hit.product_id;
+        if (batchId) recordImportItem(db, batchId, id, "updated", db.prepare("SELECT name, price, cost, min_stock, category_id FROM products WHERE id=?").get(id), r.stock);
         db.prepare("UPDATE products SET name=?, price=?, cost=?, stock=stock+?, min_stock=COALESCE(?, min_stock) WHERE id=?").run(r.name, r.price, r.cost, r.stock, r.minStock ?? null, id);
         updated++;
       } else {
         id = addProduct(db, { name: r.name, price: r.price, cost: r.cost, stock: r.stock, barcodes: [r.barcode] });
         if (r.minStock) db.prepare("UPDATE products SET min_stock=? WHERE id=?").run(r.minStock, id);
+        if (batchId) recordImportItem(db, batchId, id, "created");
         created++;
       }
       if (r.category?.trim()) db.prepare("UPDATE products SET category_id=? WHERE id=?").run(ensureCategory(db, r.category), id);
-      if (r.stock) db.prepare("INSERT INTO stock_movements(product_id,delta,reason,created_at) VALUES(?,?,?,?)").run(id, r.stock, "purchase", now);
-      if (r.expiry && r.stock > 0) db.prepare("INSERT INTO batches(product_id,qty,expiry,created_at) VALUES(?,?,?,?)").run(id, r.stock, r.expiry, now);
+      if (r.stock) db.prepare("INSERT INTO stock_movements(product_id,delta,reason,created_at,import_id) VALUES(?,?,?,?,?)").run(id, r.stock, "purchase", now, batchId ?? null);
+      if (r.expiry && r.stock > 0) db.prepare("INSERT INTO batches(product_id,qty,expiry,created_at,import_id) VALUES(?,?,?,?,?)").run(id, r.stock, r.expiry, now, batchId ?? null);
     }
   })();
   return { created, updated };

@@ -1,10 +1,13 @@
 /** Methods the renderer may call. Kept in its own file so the sandboxed preload can import it without Node modules. */
 export const API_METHODS = [
   "bootstrap", "setupOwner", "login", "logout", "saveSettings", "activate", "scan", "search",
-  "checkout", "importCsv", "print", "addUser", "setUserActive", "resetPin",
+  "checkout", "importCsv", "listImports", "undoImport", "print", "addUser", "setUserActive", "resetPin",
   "openShift", "shiftReport", "listShifts", "closeShift", "holdCart", "listHeld", "resumeHeld", "deleteHeld",
   "findSale", "createReturn",
   "listCustomers", "addCustomer", "setCreditLimit", "customerStatement", "receivePayment",
+  "listParties", "saveParty", "setPartyActive", "importParties", "supplierStatement", "listPurchases", "purchaseDetails", "createPurchase",
+  "paySupplier", "voidPurchase", "addSupplierOpening", "supplierDues", "listCategories", "addCategory", "renameCategory", "deleteCategory",
+  "seedCategories", "listPromotions", "savePromotion", "setPromotionActive", "previewCart", "reportList", "runReport", "exportReport",
   "addExpense", "listExpenses", "deleteExpense",
   "listProducts", "saveProduct", "receiveStock", "adjustStock", "expiring",
   "analytics", "treasury", "treasuryEntries", "treasuryDeposit", "treasuryWithdraw", "treasuryTransfer", "treasuryCount", "backupNow", "backupExport", "restoreBackup",

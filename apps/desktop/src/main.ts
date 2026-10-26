@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
-import { copyFileSync, existsSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { API_METHODS } from "@market/core";
 import { getSetting, listUsers, openDb, type Db } from "@market/db";
@@ -25,6 +25,35 @@ async function printHtml(html: string) {
   );
 }
 
+type ExportArgs = Parameters<NonNullable<Parameters<typeof createService>[0]["exportFile"]>>[0];
+
+/** Excel / PDF / print for the reports center: the dialogs and the print engine live here in the main process. */
+async function exportFile(a: ExportArgs): Promise<string | null> {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const save = async (ext: string, name: string) => {
+    const r = await dialog.showSaveDialog({ title: "حفظ التقرير", defaultPath: `${a.title}-${stamp}.${ext}`, filters: [{ name, extensions: [ext] }] });
+    return r.canceled ? null : r.filePath ?? null;
+  };
+  if (a.kind === "xlsx") {
+    const file = await save("xlsx", "Excel");
+    if (!file) return null;
+    writeFileSync(file, await a.buildXlsx());
+    return file;
+  }
+  const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  try {
+    await w.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(a.html));
+    if (a.kind === "pdf") {
+      const file = await save("pdf", "PDF");
+      if (!file) return null;
+      writeFileSync(file, await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }));
+      return file;
+    }
+    await new Promise<void>((resolve, reject) => w.webContents.print({ silent: false, printBackground: true }, (ok, why) => (ok || /cancel/i.test(why) ? resolve() : reject(new Error(why || "فشلت الطباعة")))));
+    return "print";
+  } finally { w.close(); }
+}
+
 function start() {
   const migrations = dev ? join(__dirname, "../../../packages/db/migrations") : join(process.resourcesPath, "migrations");
   const dataDir = app.getPath("userData");
@@ -37,7 +66,7 @@ function start() {
   let demoDb: Db | null = null;
   let demoSvc: Service | null = null;
 
-  const common = { fingerprint, publicKeyPem: __LICENSE_PUBLIC_KEY__, print: printHtml };
+  const common = { fingerprint, publicKeyPem: __LICENSE_PUBLIC_KEY__, print: printHtml, exportFile };
   const cloud = createCloud({ db, config: cloudConfig?.apiKey && cloudConfig.projectId ? cloudConfig : null, deviceCode: fingerprint, alertDays: () => Number(getSetting(db, "expiry_alert_days")) || 30 });
 
   const real: Service = createService({

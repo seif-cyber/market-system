@@ -16,6 +16,7 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
   const [discount, setDiscount] = useState(0);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tendered, setTendered] = useState("");
+  const [promo, setPromo] = useState<{ byProduct: Record<number, { discount: number; name: string | null }>; total: number }>({ byProduct: {}, total: 0 });
   const [open, setOpen] = useState(fromPiastres(b.handover?.counted ?? 0));
   const [custom, setCustom] = useState(false);
   const [reason, setReason] = useState("");
@@ -24,9 +25,16 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const locked = b.license.mode === "readonly";
   const subtotal = lines.reduce((s, l) => s + Math.round(l.p.price * l.qty), 0);
-  const total = Math.max(0, subtotal - discount);
+  const total = Math.max(0, subtotal - promo.total - discount);
   const validCart = lines.length > 0 && lines.every((l) => l.qty > 0);
   const change = tendered ? toPiastres(tendered) - total : null;
+
+  // The server decides which offers apply; the cart only shows its preview.
+  useEffect(() => {
+    if (!lines.length) { setPromo({ byProduct: {}, total: 0 }); return; }
+    const t = setTimeout(() => api.previewCart(lines.map((l) => ({ productId: l.p.id, qty: l.qty }))).then((r) => setPromo({ byProduct: Object.fromEntries(r.lines.map((x) => [x.productId, { discount: x.discount, name: x.name }])), total: r.total })).catch(() => {}), 120);
+    return () => clearTimeout(t);
+  }, [lines]);
 
   const focus = useCallback(() => setTimeout(() => input.current?.focus(), 0), []);
   useEffect(() => { focus(); }, [focus, dlg, b.shift]);
@@ -139,7 +147,7 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
                 <tr key={l.p.id}>
                   <td>{l.p.name}</td><td>{egp(l.p.price)}</td>
                   <td><input className="qty" type="number" min="0.001" step="any" value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: +e.target.value || 0 } : x)))} /></td>
-                  <td>{egp(Math.round(l.p.price * l.qty))}</td>
+                  <td>{egp(Math.round(l.p.price * l.qty))}{promo.byProduct[l.p.id]?.discount > 0 && <div className="up small">🏷 {promo.byProduct[l.p.id].name}: − {egp(promo.byProduct[l.p.id].discount)}</div>}</td>
                   <td><button onClick={() => { setLines(lines.filter((_, j) => j !== i)); focus(); }} aria-label="حذف">✕</button></td>
                 </tr>
               ))}
@@ -151,6 +159,7 @@ export function Pos({ b, onChange }: { b: Bootstrap; onChange: () => void }) {
       <aside>
         <div className="total">
           <div className="row between"><span>الإجمالي</span><span>{egp(subtotal)}</span></div>
+          {promo.total > 0 && <div className="row between up"><span>🏷 خصم عروض</span><span>− {egp(promo.total)}</span></div>}
           {discount > 0 && <div className="row between down"><span>خصم</span><span>− {egp(discount)}</span></div>}
           <div className="row between big-total"><span>المطلوب</span><b>{egp(total)}</b></div>
           <label className="mini">المبلغ المدفوع (للباقي)<input type="number" min="0" value={tendered} onChange={(e) => setTendered(e.target.value)} /></label>

@@ -1,5 +1,5 @@
 import type { CloudStatus } from "@market/core";
-import { analytics, getSetting, rangeFor, setSetting, type Db } from "@market/db";
+import { analytics, balances, getSetting, listEntries, listPurchases, rangeFor, setSetting, supplierDues, totalPayables, totalReceivables, type Db } from "@market/db";
 import type { Cloud } from "./service";
 
 export interface CloudConfig { apiKey: string; projectId: string }
@@ -86,6 +86,8 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
       const sig = JSON.stringify(d.db.prepare(
         `SELECT (SELECT MAX(id) FROM sales) s, (SELECT MAX(id) FROM returns) r, (SELECT COUNT(*) FROM expenses) e, (SELECT MAX(id) FROM expenses) e2,
                 (SELECT MAX(id) FROM stock_movements) m, (SELECT MAX(id) FROM customer_ledger) l, (SELECT MAX(id) FROM shifts) h,
+                (SELECT MAX(id) FROM treasury_entries) te, (SELECT MAX(id) FROM supplier_ledger) sl, (SELECT MAX(id) FROM purchase_invoices) pi,
+                (SELECT COUNT(*) FROM purchase_invoices WHERE voided=1) pv, (SELECT COUNT(*) FROM promotions) pr,
                 (SELECT MAX(closed_at) FROM shifts) hc, (SELECT COUNT(*) FROM batches) b, date('now','localtime') d`).get());
       const full = sig !== get("cloud_sig") || t - (Number(get("cloud_last_full")) || 0) > 6 * 3_600_000;
       if (!full) {
@@ -121,6 +123,27 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
         `SELECT sh.id, u.name cashier, sh.opened_at openedAt, sh.closed_at closedAt, sh.opening_cash openingCash, sh.counted_cash counted, sh.expected_cash expected
          FROM shifts sh JOIN users u ON u.id=sh.user_id WHERE sh.closed_at IS NOT NULL ORDER BY sh.closed_at DESC LIMIT 30`,
       ).all();
+      const bal = balances(d.db);
+      writes.push({
+        path: "meta/treasury",
+        fields: {
+          json: str(JSON.stringify({
+            ...bal, receivables: totalReceivables(d.db), payables: totalPayables(d.db),
+            entries: listEntries(d.db, { limit: 60 }).map((e) => ({ at: e.createdAt, account: e.account, kind: e.kind, note: e.note, delta: e.delta, balance: e.balanceAfter, user: e.userName })),
+          })),
+          syncedAt: int(t),
+        },
+      });
+      writes.push({
+        path: "meta/suppliers",
+        fields: {
+          json: str(JSON.stringify({
+            dues: supplierDues(d.db, t),
+            invoices: listPurchases(d.db, { limit: 40 }, t).filter((p) => !p.voided).map((p) => ({ id: p.id, supplier: p.supplier, ref: p.supplierRef, date: p.invoiceDate, due: p.dueDate, total: p.total, paid: p.paid, remaining: p.remaining, status: p.status })),
+          })),
+          syncedAt: int(t),
+        },
+      });
       writes.push({ path: "meta/shifts", fields: { json: str(JSON.stringify(shifts)), syncedAt: int(t) } });
       writes.push({
         path: "meta/status",

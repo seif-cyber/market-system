@@ -1,5 +1,6 @@
 import type { Db } from "./types";
 import { postEntry } from "./treasury";
+import { recordImportItem } from "./imports";
 
 export interface CustomerRow { id: number; name: string; phone: string; creditLimit: number; balance: number }
 
@@ -99,6 +100,23 @@ export function saveParty(db: Db, p: PartyInput, now = Date.now()): number {
     return p.id;
   }
   return Number(db.prepare("INSERT INTO customers(name,phone,code,tax_no,address,email,notes,is_customer,is_supplier,credit_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(...f, now).lastInsertRowid);
+}
+
+/** Upsert by code when given, otherwise by exact name. */
+export function importParties(db: Db, rows: { code: string; name: string; phone: string; taxNo: string; address: string; email: string; isCustomer: boolean; isSupplier: boolean; creditLimit: number }[], now = Date.now(), batchId?: number) {
+  let created = 0, updated = 0;
+  db.transaction(() => {
+    for (const r of rows) {
+      const hit = (r.code ? db.prepare("SELECT id FROM customers WHERE code=?").get(r.code) : db.prepare("SELECT id FROM customers WHERE name=?").get(r.name)) as { id: number } | undefined;
+      if (hit) {
+        const cur = getParty(db, hit.id)!;
+        if (batchId) recordImportItem(db, batchId, hit.id, "updated", { name: cur.name, phone: cur.phone, code: cur.code, taxNo: cur.taxNo, address: cur.address, email: cur.email, isCustomer: cur.isCustomer ? 1 : 0, isSupplier: cur.isSupplier ? 1 : 0, creditLimit: cur.creditLimit });
+        saveParty(db, { ...r, id: hit.id, isCustomer: r.isCustomer || (cur.isCustomer && cur.receivable !== 0), isSupplier: r.isSupplier || (cur.isSupplier && cur.payable !== 0) }, now);
+        updated++;
+      } else { const id = saveParty(db, r, now); if (batchId) recordImportItem(db, batchId, id, "created"); created++; }
+    }
+  })();
+  return { created, updated };
 }
 
 /** "Delete" = deactivate, and only when nothing is owed either way. */

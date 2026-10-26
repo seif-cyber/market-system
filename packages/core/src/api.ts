@@ -77,10 +77,54 @@ export interface Customer { id: number; name: string; phone: string; creditLimit
 export interface LedgerEntry { id: number; delta: number; kind: string; method: string | null; note: string | null; createdAt: number; balanceAfter: number }
 export interface Expense { id: number; category: string; amount: number; note: string; createdAt: number; userName: string; paidFrom: Account; fromDrawer: boolean }
 
-export interface InventoryProduct { id: number; name: string; barcode: string; price: number; cost: number; stock: number; minStock: number; byWeight: boolean }
-export interface SaveProductInput { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean }
+export interface InventoryProduct { id: number; name: string; barcode: string; price: number; cost: number; stock: number; minStock: number; byWeight: boolean; categoryId: number | null; category: string }
+export interface SaveProductInput { id?: number; name: string; barcode: string; price: number; cost: number; minStock: number; byWeight: boolean; categoryId?: number | null }
 export interface ReceiveStockInput { productId: number; qty: number; cost?: number; expiry?: number }
 export interface ExpiringBatch { productId: number; name: string; qty: number; expiry: number; daysLeft: number }
+
+export type ReportFilterKey = "range" | "userId" | "partyId" | "productId" | "categoryId" | "payMethod" | "account";
+export interface ReportMeta { id: string; group: "sales" | "purchases" | "inventory" | "finance"; title: string; filters: ReportFilterKey[] }
+export interface ReportFilters {
+  range?: RangePreset | "custom" | "all"; from?: number; to?: number;
+  userId?: number; partyId?: number; productId?: number; categoryId?: number; payMethod?: string; account?: string;
+}
+export interface ReportCol { key: string; label: string; type: "text" | "money" | "qty" | "int" | "date" | "percent" }
+export interface ReportResult {
+  id: string; title: string; columns: ReportCol[]; rows: Record<string, string | number | null>[];
+  totals: Record<string, string | number> | null; from: number; to: number;
+}
+
+export interface Party {
+  id: number; code: string; name: string; phone: string; taxNo: string; address: string; email: string; notes: string;
+  isCustomer: boolean; isSupplier: boolean; active: boolean; creditLimit: number; receivable: number; payable: number; net: number;
+}
+export interface PartyInput {
+  id?: number; name: string; phone?: string; code?: string; taxNo?: string; address?: string; email?: string; notes?: string;
+  isCustomer: boolean; isSupplier: boolean; creditLimit?: number;
+}
+export type PaySource = "cash" | "bank" | "drawer";
+export interface PurchaseInputApi {
+  supplierId: number; supplierRef?: string; invoiceDate: number; dueDate?: number | null; note?: string;
+  items: { productId: number; qty: number; unitCost: number; expiry?: number }[];
+  paid?: { amount: number; source: PaySource };
+}
+export interface PurchaseRow {
+  id: number; supplierId: number; supplier: string; supplierRef: string; invoiceDate: number; dueDate: number | null;
+  total: number; paid: number; remaining: number; voided: boolean; note: string; status: "paid" | "partial" | "unpaid" | "overdue" | "voided";
+}
+export interface PurchaseDetails { invoice: PurchaseRow; items: { productId: number; name: string; qty: number; unitCost: number; expiry: number | null }[] }
+export interface SupplierLedgerEntry { id: number; delta: number; kind: string; note: string | null; createdAt: number; refId: number | null; supplierRef: string | null; balanceAfter: number }
+export interface SupplierDue { id: number; name: string; phone: string; balance: number; overdue: number; nextDue: number | null }
+export interface ImportBatch { id: number; kind: "products" | "parties"; label: string; createdAt: number; userName: string; created: number; updated: number; undone: boolean; undoable: boolean }
+export interface Category { id: number; name: string; products: number }
+
+export type PromoTypeApi = "percent" | "amount" | "bxgy";
+export interface PromotionInput {
+  id?: number; name: string; type: PromoTypeApi; target: "product" | "category"; targetId: number;
+  value: number; buyQty: number; getQty: number; startsAt: number; endsAt: number;
+}
+export interface PromotionRow extends PromotionInput { id: number; active: boolean; targetName: string; state: "running" | "upcoming" | "ended" | "stopped" }
+export interface CartPreview { lines: { productId: number; discount: number; name: string | null }[]; total: number }
 
 export interface Analytics {
   range: { from: number; to: number };
@@ -131,7 +175,9 @@ export interface Api {
   scan(code: string): Promise<ProductHit | null>;
   search(q: string): Promise<ProductHit[]>;
   checkout(i: CheckoutInput): Promise<CheckoutResult>;
-  importCsv(text: string): Promise<{ created: number; updated: number; errors: string[] }>;
+  importCsv(text: string, fileName?: string): Promise<{ created: number; updated: number; errors: string[]; batchId: number | null }>;
+  listImports(): Promise<ImportBatch[]>;
+  undoImport(id: number): Promise<{ removed: number; restored: number; skipped: number }>;
   print(html: string): Promise<void>;
   addUser(name: string, role: Role, pin: string): Promise<void>;
   setUserActive(userId: number, active: boolean): Promise<void>;
@@ -153,13 +199,37 @@ export interface Api {
   addCustomer(name: string, phone: string, creditLimit: number): Promise<number>;
   setCreditLimit(customerId: number, limit: number): Promise<void>;
   customerStatement(customerId: number): Promise<LedgerEntry[]>;
+  listParties(f?: { q?: string; type?: "all" | "customer" | "supplier"; includeInactive?: boolean }): Promise<Party[]>;
+  saveParty(p: PartyInput): Promise<number>;
+  setPartyActive(id: number, active: boolean): Promise<void>;
+  importParties(csv: string, fileName?: string): Promise<{ created: number; updated: number; errors: string[]; batchId: number | null }>;
+  supplierStatement(supplierId: number): Promise<SupplierLedgerEntry[]>;
+  listPurchases(f?: { supplierId?: number; range?: RangePreset | "all" }): Promise<PurchaseRow[]>;
+  purchaseDetails(id: number): Promise<PurchaseDetails | null>;
+  createPurchase(i: PurchaseInputApi): Promise<{ id: number; total: number; paid: number; remaining: number }>;
+  paySupplier(supplierId: number, amount: number, source: PaySource, note?: string): Promise<number>;
+  voidPurchase(id: number): Promise<void>;
+  addSupplierOpening(supplierId: number, amount: number, note?: string): Promise<void>;
+  supplierDues(): Promise<SupplierDue[]>;
+  listCategories(): Promise<Category[]>;
+  addCategory(name: string): Promise<number>;
+  renameCategory(id: number, name: string): Promise<void>;
+  deleteCategory(id: number): Promise<void>;
+  seedCategories(): Promise<number>;
+  listPromotions(): Promise<PromotionRow[]>;
+  savePromotion(p: PromotionInput): Promise<number>;
+  setPromotionActive(id: number, active: boolean): Promise<void>;
+  previewCart(lines: { productId: number; qty: number }[]): Promise<CartPreview>;
+  reportList(): Promise<ReportMeta[]>;
+  runReport(id: string, f: ReportFilters): Promise<ReportResult>;
+  exportReport(id: string, f: ReportFilters, kind: "xlsx" | "pdf" | "print"): Promise<string | null>;
   receivePayment(customerId: number, amount: number, method: "cash" | "card"): Promise<number>;
 
   addExpense(category: string, amount: number, note: string, paidFrom?: Account, fromDrawer?: boolean): Promise<void>;
   listExpenses(range: RangePreset): Promise<Expense[]>;
   deleteExpense(id: number): Promise<void>;
 
-  listProducts(q: string, filter: "all" | "low" | "out"): Promise<InventoryProduct[]>;
+  listProducts(q: string, filter: "all" | "low" | "out", categoryId?: number | null): Promise<InventoryProduct[]>;
   saveProduct(p: SaveProductInput): Promise<number>;
   receiveStock(i: ReceiveStockInput): Promise<void>;
   adjustStock(productId: number, actual: number): Promise<number>;

@@ -1,4 +1,6 @@
+import { applyPromotions, type Promo } from "@market/core";
 import {
+  createPurchase, ensureCategory, paySupplier, saveParty, savePromotion, seedDefaultCategories, supplierBalance,
   addCustomer, addExpense, addPayment, adjustStock, closeShift, createReturn, createSale, createUser, deposit, getCustomer,
   getSaleForReturn, lastClosedShift, openShift, receiveStock, saveProduct, setSetting, shiftSummary, transfer, withdraw, type Db,
 } from "@market/db";
@@ -37,6 +39,14 @@ const CATALOG: [string, number, number, string, number, boolean][] = [
 const DAIRY = ["لبن جهينة 1 لتر", "زبادي جهينة 105 جم", "جبنة بيضاء كجم", "جبنة رومي كجم"];
 const HOUR_W: Record<number, number> = { 9: 3, 10: 5, 11: 6, 12: 8, 13: 10, 14: 10, 15: 8, 16: 7, 17: 8, 18: 10, 19: 13, 20: 13, 21: 10, 22: 6, 23: 2 };
 
+const CAT_RULES: [RegExp, string][] = [
+  [/لبن|زبادي|جبنة|بيض/, "ألبان وأجبان"], [/بيبسي|مياه|شاي|نسكافيه/, "مشروبات"], [/شيبسي|بسكويت|شوكولاتة|حلاوة/, "شيبسي وسناكس"],
+  [/صابون|شامبو|منظف|مناديل|معجون/, "منظفات"], [/طماطم|بطاطس|موز/, "خضار وفاكهة"], [/لحمة/, "لحوم ودواجن"],
+];
+const catOf = (name: string) => CAT_RULES.find(([re]) => re.test(name))?.[1] ?? "بقالة";
+// which supplier brings which category (index into the suppliers list below)
+const SUPPLIER_OF: Record<string, number> = { "ألبان وأجبان": 1, "مشروبات": 2, "خضار وفاكهة": 3, "لحوم ودواجن": 3, "منظفات": 4, "شيبسي وسناكس": 0, "بقالة": 0 };
+
 export function seedDemo(db: Db, now = Date.now(), days = 45) {
   const r = rng(20260101);
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
@@ -54,10 +64,13 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
   setSetting(db, "phone", "01000000000");
   setSetting(db, "footer", "شكراً لزيارتكم، نورتونا");
 
+  seedDefaultCategories(db);
   const products = CATALOG.map(([name, price, cost, barcode, pop, weighed]) => {
-    const id = saveProduct(db, { name, barcode, price: Math.round(price * 100), cost: Math.round(cost * 100), minStock: weighed ? 5 : 10, byWeight: weighed });
+    const cat = catOf(name);
+    const categoryId = ensureCategory(db, cat);
+    const id = saveProduct(db, { name, barcode, price: Math.round(price * 100), cost: Math.round(cost * 100), minStock: weighed ? 5 : 10, byWeight: weighed, categoryId });
     db.prepare("UPDATE products SET stock=2000 WHERE id=?").run(id); // plenty during the simulation; tuned afterwards
-    return { id, name, price: Math.round(price * 100), pop, weighed };
+    return { id, name, price: Math.round(price * 100), cost: Math.round(cost * 100), pop, weighed, cat, categoryId };
   });
   const sellable = products.filter((p) => p.pop > 0);
 
@@ -68,6 +81,21 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
 
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
   const today0 = startToday.getTime();
+
+  const suppliers = [
+    ["شركة النور للتوزيع", "0227000001"], ["مصنع الأمل للألبان", "0227000002"], ["العربية للمشروبات", "0227000003"],
+    ["تجار الجملة (خضار ولحوم)", "0227000004"], ["مورد المنظفات", "0227000005"],
+  ].map(([n, p], i) => saveParty(db, { name: n, phone: p, code: `S${i + 1}`, taxNo: `10${i}-200-30${i}`, address: "القاهرة", isCustomer: false, isSupplier: true }, today0 - days * DAY));
+
+  // Running offers for the last two weeks (applied to the simulated sales too, so the reports have content).
+  const promoStart = today0 - 14 * DAY, promoEnd = today0 + 14 * DAY;
+  const dairy = products.find((p) => p.cat === "ألبان وأجبان")!.categoryId, pepsi = products.find((p) => p.name.startsWith("بيبسي"))!, oil = products.find((p) => p.name.startsWith("زيت"))!;
+  const promoDefs = [
+    { name: "خصم 10٪ على الألبان والأجبان", type: "percent" as const, target: "category" as const, targetId: dairy, value: 10, buyQty: 0, getQty: 0 },
+    { name: "اشترِ 2 بيبسي وخد 1 هدية", type: "bxgy" as const, target: "product" as const, targetId: pepsi.id, value: 0, buyQty: 2, getQty: 1 },
+    { name: "خصم 5 جنيه على زيت عافية", type: "amount" as const, target: "product" as const, targetId: oil.id, value: 500, buyQty: 0, getQty: 0 },
+  ];
+  const promos: Promo[] = promoDefs.map((d) => ({ ...d, id: savePromotion(db, { ...d, startsAt: promoStart, endsAt: promoEnd }, owner, promoStart), startsAt: promoStart, endsAt: promoEnd, active: true }));
 
   // Starting capital, before the first day.
   deposit(db, { account: "cash", amount: 15_000_000, userId: owner, note: "رأس المال", createdAt: today0 - (days + 1) * DAY });
@@ -106,7 +134,11 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
           const c = pick(customers);
           customerId = c.id; paidNow = r() < 0.4 ? 5000 : 0;
         }
-        const cartLines = [...lines].map(([productId, qty]) => ({ productId, qty }));
+        const base = [...lines].map(([productId, qty]) => ({ productId, qty }));
+        const pr = ts >= promoStart
+          ? applyPromotions(base.map((l) => { const p = products.find((x) => x.id === l.productId)!; return { productId: l.productId, categoryId: p.categoryId, unitPrice: p.price, qty: l.qty }; }), promos, ts)
+          : [];
+        const cartLines = base.map((l, k) => (pr[k]?.discount ? { ...l, discount: pr[k].discount, promoId: pr[k].promoId, promoDiscount: pr[k].discount } : l));
         const subtotal = cartLines.reduce((s, l) => s + Math.round(products.find((p) => p.id === l.productId)!.price * l.qty), 0);
         try {
           if (payMethod === "credit") {
@@ -120,7 +152,7 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
           if (r() < 0.015) {
             const info = getSaleForReturn(db, sale.no)!;
             const it = info.items[0];
-            createReturn(db, { saleNo: sale.no, userId: owner, approvedBy: owner, shiftId, lines: [{ saleItemId: it.id, qty: Math.min(1, it.qty) }], createdAt: ts + 20 * 60_000 });
+            createReturn(db, { saleNo: sale.no, userId: owner, approvedBy: owner, shiftId, lines: [{ saleItemId: it.id, qty: Math.min(1, it.qty) }], createdAt: Math.min(now, ts + 20 * 60_000) });
           }
         } catch { /* skip a sale that would break a limit */ }
       }
@@ -146,6 +178,24 @@ export function seedDemo(db: Db, now = Date.now(), days = 45) {
     if (dom === 28) exp("مرتبات", 15000, "مرتبات العمال");
     if (r() < 0.15) exp("نثريات", 50 + Math.round(r() * 350));
     // Cash pays into the bank every Saturday; the owner draws money on the 15th.
+    // Goods arrive every third day; a third paid in cash, a third half-paid by transfer, a third on credit. The veg/meat supplier is never paid, so it goes overdue.
+    if (d % 3 === 0 && d > 0) {
+      const k = Math.floor(d / 3), si = k % suppliers.length;
+      const items = products.filter((p) => SUPPLIER_OF[p.cat] === si && p.pop > 0).slice(0, 8)
+        .map((p) => ({ productId: p.id, qty: p.weighed ? 20 + Math.round(r() * 20) : 30 + Math.round(r() * 50), unitCost: Math.round(p.cost * (0.97 + r() * 0.06)) }));
+      if (items.length) {
+        const total = items.reduce((s, it) => s + Math.round(it.qty * it.unitCost), 0);
+        const mode = k % 3, at = day0 + 11 * HOUR;
+        createPurchase(db, {
+          supplierId: suppliers[si], supplierRef: `INV-${1000 + k}`, invoiceDate: at, dueDate: mode === 0 ? null : at + (mode === 1 ? 21 : 14) * DAY, items, userId: owner, createdAt: at,
+          paid: mode === 0 ? { amount: total, account: "cash" } : mode === 1 ? { amount: Math.round(total / 2), account: "bank" } : undefined,
+        });
+      }
+    }
+    if (d % 9 === 0 && d > 0) {
+      const target = suppliers.filter((s, i) => i !== 3).map((s) => ({ s, b: supplierBalance(db, s) })).sort((a, b) => b.b - a.b)[0];
+      if (target && target.b > 0) paySupplier(db, { supplierId: target.s, amount: Math.round(target.b * 0.6), account: "bank", userId: owner, note: "دفعة على الحساب", createdAt: day0 + 15 * HOUR });
+    }
     if (dow === 6 && d > 0) transfer(db, { from: "cash", to: "bank", amount: 2_000_000, userId: owner, note: "إيداع في البنك", createdAt: day0 + 22 * HOUR });
     if (dom === 15 && d > 0) withdraw(db, { account: "cash", amount: 1_500_000, userId: owner, note: "مسحوبات المالك", createdAt: day0 + 20 * HOUR });
   }

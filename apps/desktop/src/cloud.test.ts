@@ -38,7 +38,7 @@ describe("cloud sync", () => {
     expect(st).toMatchObject({ configured: true, linked: true, email: "owner@shop.com", lastError: "" });
     const commit = fb.calls.find((c) => c.url.endsWith(":commit"))!;
     const names = commit.body.writes.map((w: any) => w.update.name.replace(/^.*shops\/UID1\//, ""));
-    expect(names).toEqual(expect.arrayContaining(["reports/today", "reports/7d", "reports/30d", "reports/month", "sales/000000001", "sales/000000002", "meta/status", "meta/shifts"]));
+    expect(names).toEqual(expect.arrayContaining(["reports/today", "reports/7d", "reports/30d", "reports/month", "sales/000000001", "sales/000000002", "meta/status", "meta/shifts", "meta/treasury", "meta/suppliers"]));
     const report = JSON.parse(commit.body.writes.find((w: any) => w.update.name.endsWith("reports/today")).update.fields.json.stringValue);
     expect(report.kpi.invoices).toBe(2);
     expect(JSON.stringify(commit.body)).not.toContain("secret"); // password is never sent to Firestore

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyPromotions, type Promo } from "@market/core";
 import {
-  addCategory, addPayment, addProduct, addSupplierOpening, analytics, balances, createPurchase, createSale, createUser, daysFrom, deleteCategory,
+  addCategory, addPayment, addProduct, importParties, addSupplierOpening, analytics, balances, createPurchase, createSale, createUser, daysFrom, deleteCategory,
   ensureCategory, getParty, importProducts, listActivePromotions, listParties, listProducts, listPurchases, openDb, openShift, paySupplier, rangeFor,
   renameCategory, saveParty, savePromotion, saveProduct, seedDefaultCategories, setPartyActive, setPromotionActive, shiftSummary, supplierBalance,
   supplierDues, supplierStatement, totalPayables, verifyTreasury, voidPurchase, deposit,
@@ -162,3 +162,77 @@ describe("promotions engine", () => {
   });
 });
 void addPayment;
+
+import { beginImport, listImports, undoImport } from "./index";
+describe("undoing an import", () => {
+  const exp = Date.now() + 30 * DAY;
+  function setup() {
+    const s = shop();
+    const cat = ensureCategory(s.db, "قديم");
+    saveProduct(s.db, { id: s.tea, name: "شاي", barcode: "1", price: 5000, cost: 4000, minStock: 3, byWeight: false, categoryId: cat });
+    return { ...s, cat };
+  }
+  const doImport = (s: ReturnType<typeof setup>, label = "ملف.csv") => {
+    const batch = beginImport(s.db, "products", label, s.owner);
+    importProducts(s.db, [
+      { barcode: "1", name: "شاي جديد الاسم", price: 6500, cost: 5000, stock: 25, minStock: 9, expiry: exp, category: "جديد" },   // existing product
+      { barcode: "900", name: "صنف جديد", price: 1000, cost: 700, stock: 40, expiry: exp },                                   // new product
+    ], Date.now(), batch);
+    return batch;
+  };
+  const prod = (db: ReturnType<typeof setup>["db"], id: number) => db.prepare("SELECT name, price, cost, stock, min_stock minStock, category_id cat FROM products WHERE id=?").get(id) as any;
+
+  it("restores updated products (fields + stock), removes new ones with their stock history and batches", () => {
+    const s = setup();
+    const before = prod(s.db, s.tea);
+    const batch = doImport(s);
+    expect(prod(s.db, s.tea)).toMatchObject({ name: "شاي جديد الاسم", price: 6500, stock: 10 + 25 });
+    expect(listImports(s.db)[0]).toMatchObject({ id: batch, kind: "products", created: 1, updated: 1, undone: false, undoable: true });
+    expect(undoImport(s.db, batch)).toEqual({ removed: 1, restored: 1, skipped: 0 });
+    expect(prod(s.db, s.tea)).toEqual(before);
+    expect(s.db.prepare("SELECT COUNT(*) n FROM products WHERE name='صنف جديد'").get()).toEqual({ n: 0 });
+    expect(s.db.prepare("SELECT COUNT(*) n FROM barcodes WHERE code='900'").get()).toEqual({ n: 0 });
+    expect(s.db.prepare("SELECT COUNT(*) n FROM batches").get()).toEqual({ n: 0 });
+    expect(s.db.prepare("SELECT COUNT(*) n FROM stock_movements WHERE reason='purchase'").get()).toEqual({ n: 0 });
+    expect(listImports(s.db)[0]).toMatchObject({ undone: true, undoable: false });
+    expect(() => undoImport(s.db, batch)).toThrow(/قبل كده/);
+    expect(doImport(s)).toBeGreaterThan(batch);      // the same file can be imported again afterwards
+  });
+
+  it("only the latest import can be undone", () => {
+    const s = setup();
+    const first = doImport(s, "أول"), second = doImport(s, "تاني");
+    expect(listImports(s.db).map((b) => b.undoable)).toEqual([true, false]);
+    expect(() => undoImport(s.db, first)).toThrow(/آخر استيراد/);
+    expect(undoImport(s.db, second)).toEqual({ removed: 0, restored: 2, skipped: 0 });   // the second one only updated what the first created
+    expect(listImports(s.db).map((b) => b.undoable)).toEqual([false, true]);
+    expect(undoImport(s.db, first)).toEqual({ removed: 1, restored: 1, skipped: 0 });    // now the first is the latest
+  });
+
+  it("a new product that was sold after the import is kept and reported", () => {
+    const s = setup();
+    const batch = doImport(s);
+    const sold = (s.db.prepare("SELECT product_id id FROM barcodes WHERE code='900'").get() as { id: number }).id;
+    createSale(s.db, { userId: s.owner, shiftId: s.shift, lines: [{ productId: sold, qty: 1 }], payMethod: "cash" });
+    expect(undoImport(s.db, batch)).toEqual({ removed: 0, restored: 1, skipped: 1 });
+    expect(s.db.prepare("SELECT COUNT(*) n FROM products WHERE id=?").get(sold)).toEqual({ n: 1 });
+    expect(verifyTreasury(s.db).ok).toBe(true);
+  });
+
+  it("undoes a customers/suppliers import too, keeping parties that already have transactions", () => {
+    const s = setup();
+    const keep = saveParty(s.db, { name: "قديم", phone: "01", isCustomer: true, isSupplier: false, creditLimit: 5000 });
+    const batch = beginImport(s.db, "parties", "عملاء.csv", s.owner);
+    importParties(s.db, [
+      { code: "", name: "قديم", phone: "02", taxNo: "9", address: "x", email: "e", isCustomer: true, isSupplier: true, creditLimit: 9000 },
+      { code: "", name: "جديد1", phone: "", taxNo: "", address: "", email: "", isCustomer: false, isSupplier: true, creditLimit: 0 },
+      { code: "", name: "جديد2", phone: "", taxNo: "", address: "", email: "", isCustomer: true, isSupplier: false, creditLimit: 0 },
+    ], Date.now(), batch);
+    const j2 = listParties(s.db).find((p) => p.name === "جديد2")!;
+    createSale(s.db, { userId: s.owner, shiftId: s.shift, lines: [{ productId: s.tea, qty: 1 }], payMethod: "credit", customerId: saveParty(s.db, { id: j2.id, name: "جديد2", isCustomer: true, isSupplier: false, creditLimit: 99999 }) });
+    expect(undoImport(s.db, batch)).toEqual({ removed: 1, restored: 1, skipped: 1 });
+    expect(getParty(s.db, keep)).toMatchObject({ phone: "01", isSupplier: false, creditLimit: 5000, taxNo: "" });
+    expect(listParties(s.db).map((p) => p.name)).toEqual(expect.arrayContaining(["قديم", "جديد2", "شركة النور"]));
+    expect(listParties(s.db).some((p) => p.name === "جديد1")).toBe(false);
+  });
+});
