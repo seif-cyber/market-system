@@ -120,7 +120,7 @@ function Cloud({ owner, toast }: { owner: boolean; toast: T }) {
           {st.lastError && <div className="error">آخر خطأ: {st.lastError}</div>}
           <div className="row"><button className="primary" disabled={busy} onClick={() => run(api.cloudSyncNow(), "اتبعتت البيانات")}>مزامنة الآن</button>
             {owner && <button disabled={busy} onClick={() => confirm("فك الربط؟") && run(api.cloudUnlink(), "اتفك الربط")}>فك الربط</button>}</div>
-          <p className="muted">البيانات بتتبعت لوحدها كل 10 دقايق لما يكون فيه إنترنت. لو النت قطع البرنامج بيكمل شغل عادي.</p>
+          <p className="muted">البيانات بتتبعت لوحدها كل 15 دقيقة لما يكون فيه إنترنت. لو النت قطع البرنامج بيكمل شغل عادي.</p>
         </>
       ) : owner ? (
         <>

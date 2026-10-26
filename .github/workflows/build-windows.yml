@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build Windows installer and cloud site
 on:
   workflow_dispatch:
   push:
@@ -12,7 +12,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: npm run typecheck
       - run: npm test
+      - name: Build cloud site (Firebase Hosting bundle)
+        run: npm run build -w @market/cloud
       - run: npm run build -w @market/ui
       - name: Build installer
         run: npm run dist -w @market/desktop
@@ -23,3 +26,7 @@ jobs:
         with:
           name: MarketPOS-Setup
           path: release/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-site
+          path: apps/cloud/dist

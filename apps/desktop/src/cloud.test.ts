@@ -53,6 +53,24 @@ describe("cloud sync", () => {
     expect(second.filter((n: string) => n.includes("/sales/"))).toHaveLength(1);
   });
 
+  it("idle shop sends only a one-field heartbeat; new activity triggers a full push", async () => {
+    const fb = fakeFirebase(); const { db, sell } = shop();
+    let t = Date.now() + 60_000;
+    const cloud = createCloud({ db, config: { apiKey: "K", projectId: "p" }, fetch: fb.f, now: () => t, deviceCode: "D" });
+    sell();
+    await cloud.link("a@b.c", "pw");
+    fb.calls.length = 0; t += 15 * 60_000;
+    await cloud.syncNow();
+    const idle = fb.calls.filter((c) => c.url.endsWith(":commit")).flatMap((c) => c.body.writes);
+    expect(idle).toHaveLength(1);
+    expect(idle[0].updateMask.fieldPaths).toEqual(["syncedAt"]);
+    sell(); fb.calls.length = 0; t += 15 * 60_000;
+    await cloud.syncNow();
+    const busy = fb.calls.filter((c) => c.url.endsWith(":commit")).flatMap((c) => c.body.writes);
+    expect(busy.length).toBeGreaterThan(5);
+    expect(cloud.status().lastSync).toBe(t);
+  });
+
   it("does not store the password; reports friendly errors", async () => {
     const fb = fakeFirebase(); const { db } = shop();
     const cloud = createCloud({ db, config: { apiKey: "K", projectId: "p" }, fetch: fb.f, deviceCode: "D" });

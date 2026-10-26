@@ -66,11 +66,11 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
 
   const base = () => `projects/${d.config!.projectId}/databases/(default)/documents`;
 
-  async function commit(writes: { path: string; fields: Record<string, unknown> }[]) {
+  async function commit(writes: { path: string; fields: Record<string, unknown>; mask?: string[] }[]) {
     const t = await token();
     const uid = get("cloud_uid");
     for (let i = 0; i < writes.length; i += 400) {
-      const chunk = writes.slice(i, i + 400).map((w) => ({ update: { name: `${base()}/shops/${uid}/${w.path}`, fields: w.fields } }));
+      const chunk = writes.slice(i, i + 400).map((w) => ({ update: { name: `${base()}/shops/${uid}/${w.path}`, fields: w.fields }, ...(w.mask ? { updateMask: { fieldPaths: w.mask } } : {}) }));
       await json(await f(`https://firestore.googleapis.com/v1/${base()}:commit`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${t}` }, body: JSON.stringify({ writes: chunk }),
       }));
@@ -82,7 +82,19 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
     if (!get("cloud_refresh")) throw new Error("الحساب السحابي مش مربوط");
     const t = now();
     try {
-      const writes: { path: string; fields: Record<string, unknown> }[] = [];
+      // Firestore bills per write, so when nothing changed since the last full push we only refresh the "last seen" heartbeat.
+      const sig = JSON.stringify(d.db.prepare(
+        `SELECT (SELECT MAX(id) FROM sales) s, (SELECT MAX(id) FROM returns) r, (SELECT COUNT(*) FROM expenses) e, (SELECT MAX(id) FROM expenses) e2,
+                (SELECT MAX(id) FROM stock_movements) m, (SELECT MAX(id) FROM customer_ledger) l, (SELECT MAX(id) FROM shifts) h,
+                (SELECT MAX(closed_at) FROM shifts) hc, (SELECT COUNT(*) FROM batches) b, date('now','localtime') d`).get());
+      const full = sig !== get("cloud_sig") || t - (Number(get("cloud_last_full")) || 0) > 6 * 3_600_000;
+      if (!full) {
+        await commit([{ path: "meta/status", fields: { syncedAt: int(t) }, mask: ["syncedAt"] }]);
+        setSetting(d.db, "cloud_last_sync", String(t));
+        setSetting(d.db, "cloud_last_error", "");
+        return status();
+      }
+      const writes: { path: string; fields: Record<string, unknown>; mask?: string[] }[] = [];
       const alertDays = d.alertDays?.() ?? 30;
       let integrity = true;
       for (const p of PRESETS) {
@@ -118,6 +130,8 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
       await commit(writes);
       if (sales.length) setSetting(d.db, "cloud_last_no", String(sales[sales.length - 1].no));
       else if (last === 0) setSetting(d.db, "cloud_last_no", String(top));
+      setSetting(d.db, "cloud_sig", sig);
+      setSetting(d.db, "cloud_last_full", String(t));
       setSetting(d.db, "cloud_last_sync", String(t));
       setSetting(d.db, "cloud_last_error", "");
     } catch (e) {
@@ -148,7 +162,7 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
     },
 
     async unlink() {
-      for (const k of ["cloud_email", "cloud_refresh", "cloud_uid", "cloud_last_no", "cloud_last_sync", "cloud_last_error"]) d.db.prepare("DELETE FROM settings WHERE key=?").run(k);
+      for (const k of ["cloud_email", "cloud_refresh", "cloud_uid", "cloud_last_no", "cloud_last_sync", "cloud_last_error", "cloud_sig", "cloud_last_full"]) d.db.prepare("DELETE FROM settings WHERE key=?").run(k);
       idToken = "";
       return status();
     },
@@ -158,7 +172,7 @@ export function createCloud(d: CloudDeps): Cloud & { start(intervalMs?: number):
     },
 
     /** Background sync every few minutes while the app is open; silent when unlinked or offline. */
-    start(intervalMs = 10 * 60_000) {
+    start(intervalMs = 15 * 60_000) {
       const tick = () => { if (get("cloud_refresh")) this.syncNow().catch(() => {}); };
       const first = setTimeout(tick, 15_000);
       const h = setInterval(tick, intervalMs);

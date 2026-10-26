@@ -18,3 +18,4 @@ button.inv{width:100%;display:grid;grid-template-columns:auto 1fr auto auto;gap:
 .tag{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line)}.s-credit-t{color:var(--warn);border-color:var(--warn)}.s-card-t{color:var(--alt);border-color:var(--alt)}
 .inv-items{border:0;border-top:1px solid var(--line);border-radius:0}.panel{overflow-x:auto}
 @media (max-width:640px){main{padding:12px}.kpis{grid-template-columns:repeat(2,1fr)}.kpi b{font-size:22px}button.inv{grid-template-columns:auto 1fr auto}.inv-meta{grid-column:1/-1;order:5}.tag{display:none}}
+@media (max-width:640px){.app.cloud header{flex-wrap:nowrap;gap:8px}.app.cloud .brand{min-width:0;font-size:16px}.app.cloud .brand b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.app.cloud .who .muted{display:none}}
