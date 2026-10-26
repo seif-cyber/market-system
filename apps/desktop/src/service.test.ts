@@ -170,10 +170,23 @@ describe("service", () => {
     await expect(s.svc.setUserActive(o.id, false)).rejects.toThrow(/نفسك/);
   });
 
-  it("support button opens a wa.me link with device code", async () => {
+  it("debt reminder opens a wa.me link for the customer's number", async () => {
+    await ownerLogin();
+    const c = await s.svc.addCustomer("أبو علي", "01012345678", 100000);
+    await s.svc.checkout({ lines: [{ productId: 1, qty: 1 }], payMethod: "credit", customerId: c });
+    await s.svc.remindCustomer(c);
+    expect(s.opened[0]).toMatch(/^https:\/\/wa\.me\/201012345678\?text=/);
+    expect(decodeURIComponent(s.opened[0])).toContain("50.00");
+    const none = await s.svc.addCustomer("بدون رقم", "", 0);
+    await expect(s.svc.remindCustomer(none)).rejects.toThrow(/تليفون/);
+  });
+
+  it("support opens wa.me for the primary contact by default, or the second engineer on request", async () => {
     await s.svc.contactSupport();
-    expect(s.opened[0]).toMatch(/^https:\/\/wa\.me\/201555262127\?text=/);
+    expect(s.opened[0]).toMatch(/^https:\/\/wa\.me\/201159858866\?text=/);
     expect(decodeURIComponent(s.opened[0])).toContain("FP1");
+    await s.svc.contactSupport("secondary");
+    expect(s.opened[1]).toMatch(/^https:\/\/wa\.me\/201555262127\?text=/);
   });
 });
 

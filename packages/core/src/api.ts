@@ -148,7 +148,8 @@ export interface Api {
 
   enterDemo(): Promise<void>;
   exitDemo(): Promise<void>;
-  contactSupport(message?: string): Promise<void>;
+  contactSupport(who?: "primary" | "secondary", message?: string): Promise<void>;
+  remindCustomer(customerId: number): Promise<void>;
 
   cloudStatus(): Promise<CloudStatus>;
   cloudLink(email: string, password: string): Promise<CloudStatus>;

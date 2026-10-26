@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  licenseState, parseProductsCsv, parseScaleBarcode, whatsappUrl,
+  licenseState, parseProductsCsv, parseScaleBarcode, SUPPORT_CONTACTS, whatsappUrl,
   type Api, type Approval, type BrandSettings, type CloudStatus, type Role, type SessionUser,
 } from "@market/core";
 import {
@@ -424,9 +424,22 @@ export function createService(deps: Deps): Service {
     // ---- demo, support, cloud ----
     async enterDemo() { await deps.enterDemo?.(); },
     async exitDemo() { await deps.exitDemo?.(); },
-    async contactSupport(message) {
-      const text = message ?? `السلام عليكم، محتاج مساعدة في برنامج الكاشير.\nالمحل: ${brand().brand_name}\nكود الجهاز: ${fingerprint}`;
-      await deps.openUrl?.(whatsappUrl(text));
+    async contactSupport(who, message) {
+      const contact = SUPPORT_CONTACTS.find((c) => c.id === who) ?? SUPPORT_CONTACTS[0];
+      const text = message ?? `السلام عليكم ${contact.name}، محتاج مساعدة في برنامج الكاشير.\nالمحل: ${brand().brand_name}\nكود الجهاز: ${fingerprint}`;
+      await deps.openUrl?.(whatsappUrl(text, contact.phone));
+    },
+
+    async remindCustomer(customerId) {
+      const u = need("cashier");
+      const c = getCustomer(db, customerId);
+      if (!c) throw new Error("العميل غير موجود");
+      const digits = c.phone.replace(/\D/g, "");
+      if (digits.length < 10) throw new Error("رقم تليفون العميل مش مسجّل");
+      const intl = digits.startsWith("20") ? digits : digits.replace(/^0/, "20");
+      const text = `السلام عليكم ${c.name}، مديونيتكم عند ${brand().brand_name} هي ${(c.balance / 100).toFixed(2)} جنيه. شكراً لتعاملكم معنا.`;
+      audit(db, u.id, "debt_reminder", { customerId });
+      await deps.openUrl?.(`https://wa.me/${intl}?text=${encodeURIComponent(text)}`);
     },
 
     async cloudStatus() {

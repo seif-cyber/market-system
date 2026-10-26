@@ -8,7 +8,7 @@ export const API_METHODS = [
   "addExpense", "listExpenses", "deleteExpense",
   "listProducts", "saveProduct", "receiveStock", "adjustStock", "expiring",
   "analytics", "backupNow", "backupExport", "restoreBackup",
-  "enterDemo", "exitDemo", "contactSupport",
+  "enterDemo", "exitDemo", "contactSupport", "remindCustomer",
   "cloudStatus", "cloudLink", "cloudUnlink", "cloudSyncNow",
 ] as const;
 export type ApiMethod = (typeof API_METHODS)[number];

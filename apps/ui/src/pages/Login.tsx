@@ -1,6 +1,16 @@
 import { useState } from "react";
 import type { Bootstrap } from "@market/core";
 import { api, errMsg } from "../api";
+import { SupportButton } from "../components/ui";
+
+function Extras({ onDone }: { onDone: () => void }) {
+  return (
+    <div className="extras">
+      <button className="link" onClick={() => api.enterDemo().then(onDone)}>▶ جرّب النظام ببيانات تجريبية</button>
+      <SupportButton label="💬 الدعم الفني على واتساب" />
+    </div>
+  );
+}
 
 export function Setup({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
@@ -15,6 +25,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <label>PIN<input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} required /></label>
         {err && <div className="error">{err}</div>}
         <button className="primary">ابدأ</button>
+        <Extras onDone={onDone} />
       </form>
     </div>
   );
@@ -35,6 +46,7 @@ export function Login({ b, onDone }: { b: Bootstrap; onDone: () => void }) {
         <label>PIN<input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} /></label>
         {err && <div className="error">{err}</div>}
         <button className="primary">دخول</button>
+        <Extras onDone={onDone} />
       </form>
     </div>
   );
