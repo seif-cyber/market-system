@@ -1,0 +1,26 @@
+appId: com.marketsystem.pos
+productName: Market POS
+directories:
+  output: ../../release
+files:
+  - dist/**
+  - build/icon.png
+  - package.json
+  - ui/**
+extraResources:
+  - from: ../../packages/db/migrations
+    to: migrations
+asar: true
+npmRebuild: true
+win:
+  target: nsis
+  icon: build/icon.ico
+nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  language: "1025"
+electronVersion: 33.2.1

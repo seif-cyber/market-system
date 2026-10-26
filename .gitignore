@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+*.db
+*.db-wal
+*.db-shm
+keys/private*.pem
+.env
+/apps/desktop/ui/
+keys/
+apps/cloud/mock-data.json
